@@ -174,20 +174,24 @@
                     };
 
                     ws.onmessage = (event) => {
+                        console.log("WS msg:", event.data);
                         if (event.data.includes("⏳")) {
                             log(event.data, "warning");
-                            statusText.innerText = "Processing Audio & Extracting Ideas...";
+                            statusText.innerText = "Status: Finalizing...";
                         } else if (event.data.includes("✅")) {
                             log(event.data, "success");
-                            statusText.innerText = "Status: Ready.";
-                            ws.close();
-                            // Refresh feed automatically after DSP!
+                            statusText.innerText = "Status: Processing Complete.";
+                            stopBtn.disabled = false;
+                            
+                            // Auto-refresh the feed after processing!
                             if (currentMode === 'session') loadIdeas();
+                            if (currentMode === 'marker') loadMarker();
+                            
                         } else {
                             log("Backend: " + event.data, event.data.includes("❌") ? "error" : "info");
                             if (event.data.includes("❌")) ws.close();
                         }
-                    }
+                    };
 
                     mediaRecorder.start(2000);
                     startBtn.classList.add('hidden');
