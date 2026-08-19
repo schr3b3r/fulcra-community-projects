@@ -124,6 +124,10 @@ def main():
     y_session, sr = librosa.load(hq_session_wav, sr=22050)
     y_marker_raw, _ = librosa.load(hq_marker_wav, sr=22050)
     
+    print("   -> Normalizing audio to 0 dB to fix low-gain mobile recordings...")
+    y_session = librosa.util.normalize(y_session)
+    y_marker_raw = librosa.util.normalize(y_marker_raw)
+    
     y_marker, _ = librosa.effects.trim(y_marker_raw, top_db=25)
     
     print("5. Calculating Normalized MFCC Cross-Correlation...")
@@ -137,7 +141,7 @@ def main():
     for i in range(mfcc_marker.shape[0]):
         res += signal.correlate(mfcc_session[i], mfcc_marker[i], mode='valid')
         
-    threshold = np.max(res) * 0.70
+    threshold = np.max(res) * 0.94 # Extremely strict threshold to reject mobile mic noise
     min_distance = librosa.time_to_frames(5.0, sr=sr)
     
     peaks, _ = signal.find_peaks(res, height=threshold, distance=min_distance)

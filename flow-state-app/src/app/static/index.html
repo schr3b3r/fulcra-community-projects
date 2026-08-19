@@ -144,8 +144,9 @@
 
         startBtn.onclick = async () => {
             try {
+                // Use raw audio for better dynamic range, but keep autoGainControl on for mobile mics
                 const stream = await navigator.mediaDevices.getUserMedia({ 
-                    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } 
+                    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true } 
                 });
                 
                 // We need to use WSS (Secure WebSockets) when the site is loaded over HTTPS (like via Cloudflare)
