@@ -37,3 +37,10 @@ bash scripts/start_server.sh
 ### 4. Handoff
 Once the server is running, inform the user:
 "Flow State is now running! Open http://127.0.0.1:8000 in your browser to begin recording."
+
+
+## Iterate / Develop Mode
+If the user explicitly asks to *modify*, *extend*, or *understand* the app rather than just run it, do not just start the server. Instead, onboard yourself into the project's historical context:
+1. **Absorb Context:** Read the markdown files in the `context/` directory (especially `journal.md` and `architecture_v2.md`). These contain the entire history of pivots, DSP math decisions, and UX choices made during the app's creation.
+2. **Assume the Framework:** Assume the persona of the `fulcra-rapid-prototype` skill. You are currently picking up the project at **Phase 6 (Build)**. 
+3. **Continue the Journey:** When you make changes, continue appending to `context/journal.md` and treat the local codebase as the state machine, just as the original prototyping agent did.
