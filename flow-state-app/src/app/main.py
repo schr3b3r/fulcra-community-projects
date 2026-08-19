@@ -189,15 +189,20 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.send_text(f"✅ Uploaded marker successfully to Fulcra: {fulcra_path}")
 
     except WebSocketDisconnect:
-        print("WebSocket disconnected unexpectedly. Salvaging recording...")
-        fulcra_path = f"/agent/flow-state/sessions/raw/salvaged_{timestamp}.webm"
-        try:
-            subprocess.run(["uvx", "fulcra-api", "file", "upload", temp_path, fulcra_path], check=True, capture_output=True, text=True)
-            # Since the browser disconnected, we can't update the UI anyway, so we just run the worker detached
-            if mode == "session":
-                subprocess.Popen([sys.executable, "worker/processor.py"])
-        except subprocess.CalledProcessError as e:
-            print(f"Salvage upload failed: {e.stderr}")
-        finally:
+        # Wait briefly to ensure the frontend had time to send the final chunk before disconnecting
+        import asyncio
+        await asyncio.sleep(1.0)
+        
+        # We only salvage if the file wasn't cleanly uploaded via the Stop button logic.
+        # If the file still exists here, it means the WebSocket crashed or the browser tab closed unexpectedly.
+        if os.path.exists(temp_path):
+            print("WebSocket disconnected unexpectedly. Salvaging recording...")
+            fulcra_path = f"/agent/flow-state/sessions/raw/salvaged_{timestamp}.webm"
+            try:
+                subprocess.run(["uvx", "fulcra-api", "file", "upload", temp_path, fulcra_path], check=True, capture_output=True, text=True)
+                if mode == "session":
+                    subprocess.Popen([sys.executable, "worker/processor.py"])
+            except subprocess.CalledProcessError as e:
+                print(f"Salvage upload failed: {e.stderr}")
             if os.path.exists(temp_path):
                 os.remove(temp_path)
