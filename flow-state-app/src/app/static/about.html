@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flow State - How It Works</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+<style>
+    </style>
+</head>
+<body class="bg-black text-white font-sans antialiased">
+    <!-- Navbar -->
+    <nav class="border-b border-zinc-800 bg-black sticky top-0 z-50">
+        <div class="max-w-4xl mx-auto px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <img src="/static/assets/fulcra_logo.png" alt="Fulcra Logo" class="h-6 w-6 rounded-md">
+                <a href="/" class="font-bold text-xl tracking-tight text-[#e2e8f0]">Flow State</a>
+            </div>
+            <div class="flex gap-6 text-sm font-medium text-zinc-400">
+                <a href="/" class="hover:text-white transition-colors">App</a>
+                <a href="/static/about.html" class="text-white">How it Works</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="max-w-2xl mx-auto px-8 py-16">
+        <h1 class="text-4xl font-bold mb-6">How It Works</h1>
+        <p class="text-xl text-zinc-400 mb-12">Flow State is an experimental audio capture tool built entirely on the Fulcra platform.</p>
+        
+        <div class="space-y-12">
+            <section>
+                <h2 class="text-2xl font-bold mb-4 text-rose-500"><span class="text-rose-800 mr-2">1.</span>Hands-Free Capture</h2>
+                <p class="text-zinc-300 leading-relaxed">
+                    Musicians shouldn't have to interact with screens while playing. Flow State uses continuous background DSP (Digital Signal Processing) to detect specific audio markers (like a high minor triad). When it hears the marker, it automatically extracts a 30-second window of audio around that timestamp.
+                </p>
+            </section>
+
+            <section>
+                <h2 class="text-2xl font-bold mb-4 text-rose-500"><span class="text-rose-800 mr-2">2.</span>Semantic Tagging</h2>
+                <p class="text-zinc-300 leading-relaxed">
+                    Instead of just saving a raw audio file, our background worker analyzes the extracted clip using <code>librosa</code> to calculate its exact Key Signature and Tempo (BPM).
+                </p>
+            </section>
+
+            <section>
+                <div class="flex items-center gap-3 mb-4">
+                    <h2 class="text-2xl font-bold text-rose-500"><span class="text-rose-800 mr-2">3.</span>Backed by <span class="text-transparent bg-clip-text bg-gradient-to-r from-[#20d8ba] to-[#7b3fe4]">Fulcra</span></h2>
+                </div>
+                <p class="text-zinc-300 leading-relaxed">
+                    Every extracted idea is stored natively in a user's Fulcra account as a custom <code>MusicalIdea</code> data type. We didn't have to spin up a database, manage file buckets, or build complex search APIs. Fulcra automatically structures the raw music data and semantic tags, making it instantly <strong>queryable</strong>. The app can effortlessly recall all ideas in 'F# minor' or filter by BPM, while the musician maintains absolute ownership of their raw WAV files and metadata in their personal vault.
+                </p>
+            </section>
+            <hr class="border-zinc-800 my-12" />
+            
+            <section>
+                <h2 class="text-2xl font-bold mb-6 text-white">Technical Details</h2>
+                <p class="text-zinc-300 leading-relaxed mb-8">
+                    Flow State uses a Python FastAPI backend to wrap the <code>fulcra-api</code> CLI, acting as a secure bridge between the browser's frontend (MediaRecorder and Wavesurfer.js) and the user's Fulcra vault. The architecture relies on three primary endpoints:
+                </p>
+
+                <div class="space-y-6">
+                    <!-- WebSocket -->
+                    <div class="bg-zinc-900 border border-zinc-800 rounded-lg p-5">
+                        <h3 class="font-mono text-rose-400 font-bold mb-2">WS /ws?mode={session|marker}</h3>
+                        <p class="text-sm text-zinc-300 leading-relaxed mb-3">
+                            Streams raw <code>audio/webm</code> chunks every 2 seconds from the browser to the FastAPI server to prevent data loss. When the socket closes, FastAPI runs:
+                        </p>
+                        <code class="block bg-black p-4 rounded-md text-xs text-zinc-400 font-mono overflow-x-auto border border-zinc-800">fulcra-api file upload temp.webm /agent/flow-state/sessions/raw/session_123.webm</code>
+                        <p class="text-sm text-zinc-300 leading-relaxed mt-4">
+                            Once the raw session is safely in Fulcra, a background DSP worker using <code>librosa</code> scans the audio, extracts ideas, and pushes <code>MomentAnnotation</code> records back to Fulcra containing the Key and BPM tags.
+                        </p>
+                    </div>
+
+                    <!-- API Ideas -->
+                    <div class="bg-zinc-900 border border-zinc-800 rounded-lg p-5">
+                        <h3 class="font-mono text-rose-400 font-bold mb-2">GET /api/ideas</h3>
+                        <p class="text-sm text-zinc-300 leading-relaxed mb-3">
+                            Instead of scanning a directory of heavy audio files, this endpoint queries Fulcra's metadata layer to hydrate the UI instantly.
+                        </p>
+                        <code class="block bg-black p-4 rounded-md text-xs text-zinc-400 font-mono overflow-x-auto border border-zinc-800">fulcra-api get-records MomentAnnotation/c4480... "30 days"
+fulcra-api tag list</code>
+                        <p class="text-sm text-zinc-300 leading-relaxed mt-4">
+                            FastAPI joins these responses, resolving the tag UUIDs into semantic strings (<code>key:F#-minor</code>), and returns a clean JSON array. The frontend uses this lightweight payload to group sessions and calculate D3.js timeline highlights.
+                        </p>
+                    </div>
+
+                    <!-- API Audio -->
+                    <div class="bg-zinc-900 border border-zinc-800 rounded-lg p-5">
+                        <h3 class="font-mono text-rose-400 font-bold mb-2">GET /api/audio?path={fulcra_path}</h3>
+                        <p class="text-sm text-zinc-300 leading-relaxed mb-3">
+                            A proxy route that streams raw audio assets from Fulcra to the browser's <code>wavesurfer.js</code> instances, bypassing WebAudio CORS restrictions.
+                        </p>
+                        <code class="block bg-black p-4 rounded-md text-xs text-zinc-400 font-mono overflow-x-auto border border-zinc-800">fulcra-api file download /agent/flow-state/ideas/...wav temp.wav</code>
+                        <p class="text-sm text-zinc-300 leading-relaxed mt-4">
+                            FastAPI fetches the requested <code>.wav</code> or <code>.webm</code> file directly from the user's private Fulcra vault and returns it as a <code>FileResponse</code> stream.
+                        </p>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </div>
+</body>
+</html>

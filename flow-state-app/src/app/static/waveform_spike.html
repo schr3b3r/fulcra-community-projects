@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flow State - Playback Spike</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Use standard script tag instead of module for broader browser compatibility -->
+    <script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
+</head>
+<body class="bg-black text-white font-sans antialiased p-8">
+    <div class="max-w-2xl mx-auto mt-20">
+        <h1 class="text-3xl font-bold mb-8">Review Ideas</h1>
+        
+        <!-- Asset Card -->
+        <div class="bg-zinc-900 rounded-xl p-6 shadow-lg border border-zinc-800 hover:border-zinc-700 transition-colors">
+            <div class="flex justify-between items-center mb-6">
+                <div>
+                    <h2 class="text-xl font-semibold">Idea_20260818_152301_at_00m_26s</h2>
+                    <p class="text-zinc-400 text-sm mt-1">Recorded 10 mins ago</p>
+                </div>
+                <div class="flex gap-2">
+                    <span class="px-3 py-1 bg-zinc-800 rounded-full text-xs text-zinc-300 font-mono">Key: F#-minor</span>
+                    <span class="px-3 py-1 bg-zinc-800 rounded-full text-xs text-zinc-300 font-mono">BPM: 99</span>
+                </div>
+            </div>
+            
+            <!-- Waveform Container -->
+            <div id="waveform" class="mb-6 cursor-pointer"></div>
+            
+            <div class="flex items-center gap-4">
+                <button id="playBtn" class="bg-white text-black px-6 py-2 rounded-full font-semibold hover:bg-zinc-200 transition-colors">
+                    Play
+                </button>
+                <span id="time" class="text-zinc-500 font-mono text-sm">Loading...</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            let isReady = false;
+            
+            const ws = WaveSurfer.create({
+                container: '#waveform',
+                waveColor: '#4f4f4f',
+                progressColor: '#a855f7',
+                cursorColor: '#ffffff',
+                barWidth: 2,
+                barGap: 2,
+                barRadius: 2,
+                height: 80,
+                // Using a known reliable demo audio file directly from wavesurfer's docs
+                url: 'https://wavesurfer.xyz/wavesurfer-code/examples/audio/audio.wav'
+            });
+
+            const playBtn = document.getElementById('playBtn');
+            const timeDisplay = document.getElementById('time');
+
+            const formatTime = (time) => [
+                Math.floor((time % 3600) / 60), 
+                ('00' + Math.floor(time % 60)).slice(-2)
+            ].join(':');
+
+            ws.on('ready', () => {
+                isReady = true;
+                timeDisplay.textContent = `0:00 / ${formatTime(ws.getDuration())}`;
+            });
+            
+            ws.on('error', (err) => {
+                console.error('Wavesurfer error:', err);
+                timeDisplay.textContent = "Error loading audio";
+            });
+            
+            ws.on('finish', () => {
+                 playBtn.textContent = 'Play';
+            });
+
+            ws.on('audioprocess', () => {
+                timeDisplay.textContent = `${formatTime(ws.getCurrentTime())} / ${formatTime(ws.getDuration())}`;
+            });
+            
+            // Update time when clicking on the waveform
+            ws.on('interaction', () => {
+                if (isReady) {
+                   timeDisplay.textContent = `${formatTime(ws.getCurrentTime())} / ${formatTime(ws.getDuration())}`;
+                   if (!ws.isPlaying()) {
+                       playBtn.textContent = 'Pause';
+                       ws.play();
+                   }
+                }
+            });
+
+            playBtn.addEventListener('click', () => {
+                if (!isReady) return;
+                
+                if (ws.isPlaying()) {
+                    ws.pause();
+                    playBtn.textContent = 'Play';
+                } else {
+                    ws.play();
+                    playBtn.textContent = 'Pause';
+                }
+            });
+        });
+    </script>
+</body>
+</html>
