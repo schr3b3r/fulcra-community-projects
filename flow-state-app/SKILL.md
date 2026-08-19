@@ -42,5 +42,5 @@ Once the server is running, inform the user:
 ## Iterate / Develop Mode
 If the user explicitly asks to *modify*, *extend*, or *understand* the app rather than just run it, do not just start the server. Instead, onboard yourself into the project's historical context:
 1. **Absorb Context:** Read `CONTEXT.md` in the root of the project. This is a distilled summary of the architecture, tech stack, and key pivots (like why we use WebSockets and how Fulcra replaces a traditional database).
-2. **Assume the Framework:** Assume the persona of the `fulcra-rapid-prototype` skill. You are currently picking up the project at **Phase 6 (Build)**.
+2. **Assume the Framework:** Load the `fulcra-rapid-prototype` skill using `skill_view(name="fulcra-rapid-prototype")` to adopt its exact rules, structure, and persona. You are currently picking up this project at **Phase 6 (Build)** of that pipeline.
 3. **Continue the Journey:** Maintain a high-signal approach. You do not need to keep a chronological journal, but if you make major architectural shifts, update `CONTEXT.md` to leave the campsite clean for the next agent.
