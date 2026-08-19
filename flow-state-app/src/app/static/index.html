@@ -302,14 +302,13 @@
                         
                         html += `
                             <div class="bg-zinc-900 rounded-xl p-4 shadow-sm border-x border-b border-zinc-800 hover:border-zinc-700 transition-colors" style="border-top: 4px solid ${idea.color};">
-                                <div class="flex flex-wrap items-center justify-between mb-4 gap-y-2">
-                                    <div class="w-full min-w-0 pr-4 sm:w-auto">
-                                        <h4 class="text-md font-semibold text-zinc-200 truncate">${title}</h4>
-                                    </div>
-                                    <div class="flex gap-2 w-full sm:w-auto shrink-0 justify-start sm:justify-end">
+                                <div class="mb-4">
+                                    <h4 class="text-md font-semibold text-zinc-200 truncate mb-2 lg:mb-0 lg:float-left lg:max-w-sm">${title}</h4>
+                                    <div class="flex gap-2 lg:float-right">
                                         ${idea.key ? `<span class="px-2 py-1 bg-zinc-800 rounded-full text-[10px] text-zinc-300 font-mono">Key: ${idea.key}</span>` : ''}
                                         ${idea.bpm ? `<span class="px-2 py-1 bg-zinc-800 rounded-full text-[10px] text-zinc-300 font-mono">BPM: ${idea.bpm}</span>` : ''}
                                     </div>
+                                    <div class="clear-both"></div>
                                 </div>
                                 <div id="waveform-${idea.id}" class="mb-4 cursor-pointer"></div>
                                 <div class="flex items-center gap-4">
