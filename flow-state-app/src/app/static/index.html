@@ -148,6 +148,7 @@
                     audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } 
                 });
                 
+                // We need to use WSS (Secure WebSockets) when the site is loaded over HTTPS (like via Cloudflare)
                 const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
                 ws = new WebSocket(`${protocol}//${window.location.host}/ws?mode=${currentMode}`);
                 chunkCount = 0;
