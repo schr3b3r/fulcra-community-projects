@@ -302,11 +302,11 @@
                         
                         html += `
                             <div class="bg-zinc-900 rounded-xl p-4 shadow-sm border-x border-b border-zinc-800 hover:border-zinc-700 transition-colors" style="border-top: 4px solid ${idea.color};">
-                                <div class="flex flex-col sm:flex-row sm:justify-between sm:items-start mb-4 gap-2 sm:gap-0">
-                                    <div>
-                                        <h4 class="text-md font-semibold text-zinc-200 truncate max-w-xs sm:max-w-sm">${title}</h4>
+                                <div class="flex flex-col sm:flex-row sm:justify-between sm:items-start mb-4 gap-2">
+                                    <div class="w-full sm:w-auto">
+                                        <h4 class="text-md font-semibold text-zinc-200 truncate w-full">${title}</h4>
                                     </div>
-                                    <div class="flex gap-2 justify-start sm:justify-end shrink-0">
+                                    <div class="flex gap-2 justify-start sm:justify-end w-full sm:w-auto shrink-0">
                                         ${idea.key ? `<span class="px-2 py-1 bg-zinc-800 rounded-full text-[10px] text-zinc-300 font-mono">Key: ${idea.key}</span>` : ''}
                                         ${idea.bpm ? `<span class="px-2 py-1 bg-zinc-800 rounded-full text-[10px] text-zinc-300 font-mono">BPM: ${idea.bpm}</span>` : ''}
                                     </div>
