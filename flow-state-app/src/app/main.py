@@ -189,9 +189,9 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.send_text(f"✅ Uploaded marker successfully to Fulcra: {fulcra_path}")
 
     except WebSocketDisconnect:
-        # Wait briefly to ensure the frontend had time to send the final chunk before disconnecting
-        import asyncio
-        await asyncio.sleep(1.0)
+        # Give the normal upload block 2 seconds to clean up the temp_path
+        # so we don't accidentally salvage a perfectly good upload just because the socket closed.
+        await asyncio.sleep(2.0)
         
         # We only salvage if the file wasn't cleanly uploaded via the Stop button logic.
         # If the file still exists here, it means the WebSocket crashed or the browser tab closed unexpectedly.
@@ -204,5 +204,6 @@ async def websocket_endpoint(websocket: WebSocket):
                     subprocess.Popen([sys.executable, "worker/processor.py"])
             except subprocess.CalledProcessError as e:
                 print(f"Salvage upload failed: {e.stderr}")
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
