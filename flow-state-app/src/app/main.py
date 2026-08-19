@@ -81,7 +81,7 @@ def get_ideas():
         tag_lookup = {t['id']: t['name'] for t in tags_data}
         
         # 2. Fetch records
-        records_res = subprocess.run(["uvx", "fulcra-api", "get-records", "MomentAnnotation/c4480f1a-b80e-45b1-9eaa-190bf564485c", "30 days"], capture_output=True, text=True, check=True)
+        records_res = subprocess.run(["uvx", "fulcra-api", "get-records", "MomentAnnotation/MusicalIdea", "30 days"], capture_output=True, text=True, check=True)
         
         ideas_feed = []
         for line in records_res.stdout.strip().split('\n'):
@@ -155,7 +155,7 @@ async def websocket_endpoint(websocket: WebSocket):
         else:
             fulcra_path = f"/agent/flow-state/sessions/raw/session_{timestamp}.webm"
             
-        subprocess.run(["fulcra-api", "file", "upload", temp_path, fulcra_path], check=True, capture_output=True)
+        subprocess.run(["uvx", "fulcra-api", "file", "upload", temp_path, fulcra_path], check=True, capture_output=True)
         
         if mode == "session":
             await websocket.send_text(f"⏳ Uploaded to Fulcra: {fulcra_path}. Processing DSP in background...")
@@ -183,7 +183,7 @@ async def websocket_endpoint(websocket: WebSocket):
         print("WebSocket disconnected unexpectedly. Salvaging recording...")
         fulcra_path = f"/agent/flow-state/sessions/raw/salvaged_{timestamp}.webm"
         try:
-            subprocess.run(["fulcra-api", "file", "upload", temp_path, fulcra_path], check=True)
+            subprocess.run(["uvx", "fulcra-api", "file", "upload", temp_path, fulcra_path], check=True)
             # Since the browser disconnected, we can't update the UI anyway, so we just run the worker detached
             if mode == "session":
                 subprocess.Popen([sys.executable, "worker/processor.py"])

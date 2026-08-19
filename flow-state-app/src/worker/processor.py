@@ -8,7 +8,7 @@ from scipy import signal
 from datetime import datetime
 
 def list_latest_file(directory, extension=".webm"):
-    result = subprocess.run(["fulcra-api", "file", "list", directory], capture_output=True, text=True)
+    result = subprocess.run(["uvx", "fulcra-api", "file", "list", directory], capture_output=True, text=True)
     if result.returncode != 0:
         return None
     lines = [line.strip() for line in result.stdout.split('\n') if line.strip()]
@@ -96,8 +96,8 @@ def main():
     hq_marker_wav = "marker_hq.wav"
     
     print(f"1. Downloading latest session ({session_filename}) and marker...")
-    subprocess.run(["fulcra-api", "file", "download", raw_session, local_raw_session], check=True)
-    subprocess.run(["fulcra-api", "file", "download", marker_template, local_raw_marker], check=True)
+    subprocess.run(["uvx", "fulcra-api", "file", "download", raw_session, local_raw_session], check=True)
+    subprocess.run(["uvx", "fulcra-api", "file", "download", marker_template, local_raw_marker], check=True)
     
     print("2. Transcoding and fixing headers (HQ 44.1kHz Stereo WAV)...")
     subprocess.run([
@@ -118,7 +118,7 @@ def main():
     
     processed_fulcra = f"/agent/flow-state/sessions/processed/{session_basename}.wav"
     print(f"3. Uploading HQ processed session to {processed_fulcra}...")
-    subprocess.run(["fulcra-api", "file", "upload", hq_session_wav, processed_fulcra], check=True)
+    subprocess.run(["uvx", "fulcra-api", "file", "upload", hq_session_wav, processed_fulcra], check=True)
     
     print("4. Loading audio into Librosa for DSP analysis (downsampling to 22050Hz for math)...")
     y_session, sr = librosa.load(hq_session_wav, sr=22050)
@@ -173,12 +173,12 @@ def main():
             
             idea_fulcra = f"/agent/flow-state/ideas/{idea_wav}"
             print(f"   -> Uploading extracted idea to {idea_fulcra}...")
-            subprocess.run(["fulcra-api", "file", "upload", idea_wav, idea_fulcra], check=True)
+            subprocess.run(["uvx", "fulcra-api", "file", "upload", idea_wav, idea_fulcra], check=True)
             
             # Log structured record to Fulcra!
             print(f"   -> Recording semantic 'MusicalIdea' annotation to Fulcra...")
             # Pipe an empty JSON object into the CLI to satisfy the input requirement
-            cmd = f"echo '{{}}' | fulcra-api record MomentAnnotation/c4480f1a-b80e-45b1-9eaa-190bf564485c --note 'Extracted from {session_filename}. File: {idea_fulcra}' --tag 'key:{detected_key}' --tag 'bpm:{detected_bpm}' --tag 'flow-state-app'"
+            cmd = f"echo '{{}}' | uvx fulcra-api record MomentAnnotation/MusicalIdea --note 'Extracted from {session_filename}. File: {idea_fulcra}' --tag 'key:{detected_key}' --tag 'bpm:{detected_bpm}' --tag 'flow-state-app'"
             subprocess.run(cmd, shell=True, check=True)
             
             if os.path.exists(idea_wav):
