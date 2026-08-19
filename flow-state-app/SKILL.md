@@ -33,6 +33,7 @@ Execute the launch script in the terminal in the background:
 ```bash
 bash scripts/start_server.sh
 ```
+*Note: On first run, this script automatically creates a local virtual environment (`.venv`) and installs the required dependencies (FastAPI, Uvicorn, and DSP libraries such as Librosa and SciPy). First-time installation may take 30–60 seconds due to audio processing packages.*
 
 ### 4. Handoff
 Once the server is running, inform the user:

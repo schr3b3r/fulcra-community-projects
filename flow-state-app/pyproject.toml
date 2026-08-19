@@ -1,0 +1,15 @@
+[project]
+name = "flow-state-app"
+version = "1.0.0"
+description = "Provisions and launches the Flow State audio capture web app locally."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "librosa",
+    "scipy",
+    "numpy",
+    "websockets",
+    "python-multipart",
+]
