@@ -41,6 +41,6 @@ Once the server is running, inform the user:
 
 ## Iterate / Develop Mode
 If the user explicitly asks to *modify*, *extend*, or *understand* the app rather than just run it, do not just start the server. Instead, onboard yourself into the project's historical context:
-1. **Absorb Context:** Read the markdown files in the `context/` directory (especially `journal.md` and `architecture_v2.md`). These contain the entire history of pivots, DSP math decisions, and UX choices made during the app's creation.
-2. **Assume the Framework:** Assume the persona of the `fulcra-rapid-prototype` skill. You are currently picking up the project at **Phase 6 (Build)**. 
-3. **Continue the Journey:** When you make changes, continue appending to `context/journal.md` and treat the local codebase as the state machine, just as the original prototyping agent did.
+1. **Absorb Context:** Read `CONTEXT.md` in the root of the project. This is a distilled summary of the architecture, tech stack, and key pivots (like why we use WebSockets and how Fulcra replaces a traditional database).
+2. **Assume the Framework:** Assume the persona of the `fulcra-rapid-prototype` skill. You are currently picking up the project at **Phase 6 (Build)**.
+3. **Continue the Journey:** Maintain a high-signal approach. You do not need to keep a chronological journal, but if you make major architectural shifts, update `CONTEXT.md` to leave the campsite clean for the next agent.
