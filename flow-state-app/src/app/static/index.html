@@ -32,52 +32,52 @@
     <div class="max-w-4xl mx-auto mt-10 px-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
         
         <!-- Left Column: Recording Controls -->
-        <div class="lg:col-span-1 space-y-6">
-            <div>
-                <h1 class="text-3xl font-bold mb-2">Flow State</h1>
+        <div class="lg:col-span-1 space-y-4 lg:space-y-6">
+            <div class="mb-4 lg:mb-0 text-center lg:text-left">
+                <h1 class="text-3xl font-bold mb-1 lg:mb-2">Flow State</h1>
                 <p class="text-zinc-400 text-sm">Capture ideas without breaking your flow.</p>
             </div>
 
-            <div class="bg-zinc-900 rounded-xl shadow-lg border border-zinc-800 overflow-hidden">
-                <div class="p-6">
-                <div class="flex gap-2 mb-6 p-1 bg-black rounded-lg">
-                    <button id="modeSession" class="flex-1 py-2 rounded-md text-sm font-semibold bg-zinc-800 text-white" onclick="setMode('session')">Session</button>
-                    <button id="modeMarker" class="flex-1 py-2 rounded-md text-sm font-semibold text-zinc-500 hover:text-white" onclick="setMode('marker')">Marker</button>
-                </div>
+            <div class="bg-black rounded-xl shadow-xl border border-zinc-800 overflow-hidden">
+                <div class="flex border-b border-zinc-800 bg-zinc-900">
+                <button id="modeSession" class="flex-1 p-3 lg:p-4 text-center font-bold text-sm text-white border-b-2 border-rose-600 focus:outline-none transition-colors" onclick="setMode('session')">Session</button>
+                <button id="modeMarker" class="flex-1 p-3 lg:p-4 text-center font-bold text-sm text-zinc-500 border-b-2 border-transparent hover:text-zinc-300 focus:outline-none transition-colors" onclick="setMode('marker')">Marker</button>
+            </div>
+            <div class="p-4 lg:p-6 bg-zinc-950 border-b border-zinc-800">
 
-                <div class="flex justify-center items-center py-6 h-32">
+                <div class="flex justify-center items-center py-4 lg:py-6 h-24 lg:h-32">
                     <button id="startBtn" class="text-rose-600 hover:text-rose-500 transition-all duration-200 transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center focus:outline-none">
-                        <span id="startIcon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-24 h-24 drop-shadow-[0_0_15px_rgba(225,29,72,0.4)]"><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="7" fill="currentColor" stroke="none" /></svg></span>
+                        <span id="startIcon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-20 h-20 lg:w-24 lg:h-24 drop-shadow-[0_0_15px_rgba(225,29,72,0.4)]"><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="7" fill="currentColor" stroke="none" /></svg></span>
                     </button>
                     
                     <button id="stopBtn" class="hidden text-zinc-400 hover:text-white transition-all duration-200 transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center focus:outline-none">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-24 h-24 drop-shadow-md"><path fill-rule="evenodd" d="M6 6a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H8a2 2 0 01-2-2V6z" clip-rule="evenodd" /></svg>
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-20 h-20 lg:w-24 lg:h-24 drop-shadow-md"><path fill-rule="evenodd" d="M6 6a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H8a2 2 0 01-2-2V6z" clip-rule="evenodd" /></svg>
                     </button>
                 </div>
                 
-                <div class="mt-6 border-t border-zinc-800 pt-4">
-                    <p id="statusText" class="font-mono text-sm text-zinc-300 mb-2">Status: Ready.</p>
-                    <div id="logArea" class="log-area font-mono text-xs text-zinc-500 h-32 overflow-y-auto space-y-1"></div>
+                <div class="mt-4 lg:mt-6 border-t border-zinc-800 pt-4">
+                    <p id="statusText" class="font-mono text-[11px] lg:text-sm text-zinc-300 mb-2 truncate">Status: Ready.</p>
+                    <div id="logArea" class="log-area font-mono text-[10px] lg:text-xs text-zinc-500 h-24 lg:h-32 overflow-y-auto space-y-1"></div>
                 </div>
-
+            </div>
                 </div>
 
                 <!-- Current Marker Accordion -->
-                <div class="mt-0 border-t border-zinc-800 bg-black">
-                    <button class="w-full p-4 text-left hover:bg-zinc-800/50 transition-colors flex justify-between items-center focus:outline-none" onclick="document.getElementById('marker-content').classList.toggle('hidden')">
+                <div class="bg-zinc-900 border-t border-zinc-800">
+                    <button class="w-full p-4 lg:p-4 text-left hover:bg-zinc-800/50 transition-colors flex justify-between items-center focus:outline-none" onclick="document.getElementById('marker-content').classList.toggle('hidden')">
                         <div>
-                            <span class="font-semibold text-zinc-300 block">Current Marker</span>
+                            <span class="font-semibold text-zinc-300 block text-sm lg:text-base">Current Marker</span>
                             <span id="markerSubtitle" class="hidden text-[10px] font-mono text-zinc-500 mt-1"></span>
                         </div>
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-zinc-500"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" /></svg>
                     </button>
-                    <div id="marker-content" class="hidden p-6 border-t border-zinc-800 bg-black">
+                    <div id="marker-content" class="hidden p-4 lg:p-6 border-t border-zinc-800 bg-black">
                         <div id="waveform-marker" class="mb-4 cursor-pointer"></div>
                         <div class="flex items-center gap-4">
-                            <button id="playBtn-marker" class="bg-zinc-100 text-black px-4 py-1.5 rounded-full font-semibold hover:bg-white transition-colors text-xs flex items-center justify-center gap-1 w-20">
+                            <button id="playBtn-marker" class="bg-zinc-100 text-black px-4 py-1.5 rounded-full font-semibold hover:bg-white transition-colors text-[10px] lg:text-xs flex items-center justify-center gap-1 w-20">
                                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3 h-3"><path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z" /></svg> Play
                             </button>
-                            <span id="time-marker" class="text-zinc-500 font-mono text-xs flex items-center gap-2">
+                            <span id="time-marker" class="text-zinc-500 font-mono text-[10px] lg:text-xs flex items-center gap-2">
                                 <svg class="animate-spin h-3 w-3 text-zinc-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                                 Loading...
                             </span>
