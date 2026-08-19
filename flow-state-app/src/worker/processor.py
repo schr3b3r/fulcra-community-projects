@@ -178,7 +178,7 @@ def main():
             # Log structured record to Fulcra!
             print(f"   -> Recording semantic 'MusicalIdea' annotation to Fulcra...")
             # Pipe an empty JSON object into the CLI to satisfy the input requirement
-            cmd = f"echo '{{}}' | uvx fulcra-api record MomentAnnotation/MusicalIdea --note 'Extracted from {session_filename}. File: {idea_fulcra}' --tag 'key:{detected_key}' --tag 'bpm:{detected_bpm}' --tag 'flow-state-app'"
+            cmd = f"echo '{{}}' | uvx fulcra-api record MomentAnnotation/c4480f1a-b80e-45b1-9eaa-190bf564485c --note 'Extracted from {session_filename}. File: {idea_fulcra}' --tag 'key:{detected_key}' --tag 'bpm:{detected_bpm}' --tag 'flow-state-app'"
             subprocess.run(cmd, shell=True, check=True)
             
             if os.path.exists(idea_wav):

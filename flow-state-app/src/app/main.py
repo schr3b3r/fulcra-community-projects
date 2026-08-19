@@ -81,7 +81,7 @@ def get_ideas():
         tag_lookup = {t['id']: t['name'] for t in tags_data}
         
         # 2. Fetch records
-        records_res = subprocess.run(["uvx", "fulcra-api", "get-records", "MomentAnnotation/MusicalIdea", "7 days"], capture_output=True, text=True)
+        records_res = subprocess.run(["uvx", "fulcra-api", "get-records", "MomentAnnotation/c4480f1a-b80e-45b1-9eaa-190bf564485c", "7 days"], capture_output=True, text=True)
         if records_res.returncode != 0:
             return {"error": f"Failed to fetch records: {records_res.stderr}"}
         
