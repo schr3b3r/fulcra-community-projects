@@ -75,15 +75,22 @@ def get_latest_marker():
 @app.get("/api/ideas")
 def get_ideas():
     try:
-        # 1. Fetch the exact UUID of the user's `MusicalIdea` data type dynamically
-        type_res = subprocess.run(["uvx", "fulcra-api", "data-type", "list"], capture_output=True, text=True, check=True)
-        musical_idea_uuid = None
-        for line in type_res.stdout.split('\n'):
-            if "MusicalIdea" in line:
-                musical_idea_uuid = line.split()[0].strip()
-                break
+        # 1. Fetch the exact ID string of the user's `MusicalIdea` data type dynamically
+        type_res = subprocess.run(["uvx", "fulcra-api", "catalog", "--category", "user_configured"], capture_output=True, text=True, check=True)
+        musical_idea_id = None
+        
+        # The output is a series of JSON lines, not a single JSON array
+        for line in type_res.stdout.strip().split('\n'):
+            if not line.strip(): continue
+            try:
+                item = json.loads(line)
+                if item.get("name") == "MusicalIdea":
+                    musical_idea_id = item.get("id") # e.g. "MomentAnnotation/c4480f1a-b80e-45b1-9eaa-190bf564485c"
+                    break
+            except json.JSONDecodeError:
+                continue
                 
-        if not musical_idea_uuid:
+        if not musical_idea_id:
             return {"error": "MusicalIdea data type not found in this Fulcra account."}
         
         # 2. Fetch tags for label resolution
@@ -91,8 +98,8 @@ def get_ideas():
         tags_data = json.loads(tags_res.stdout) if tags_res.stdout.strip() else []
         tag_lookup = {t['id']: t['name'] for t in tags_data}
         
-        # 3. Fetch records using the dynamic UUID
-        records_res = subprocess.run(["uvx", "fulcra-api", "get-records", f"MomentAnnotation/{musical_idea_uuid}", "30 days"], capture_output=True, text=True)
+        # 3. Fetch records using the dynamic ID
+        records_res = subprocess.run(["uvx", "fulcra-api", "get-records", musical_idea_id, "30 days"], capture_output=True, text=True)
         if records_res.returncode != 0:
             return {"error": f"Failed to fetch records: {records_res.stderr}"}
         
