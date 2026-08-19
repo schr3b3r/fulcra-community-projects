@@ -179,10 +179,20 @@ def main():
             print(f"   -> Uploading extracted idea to {idea_fulcra}...")
             subprocess.run(["uvx", "fulcra-api", "file", "upload", idea_wav, idea_fulcra], check=True)
             
-            # Log structured record to Fulcra!
-            print(f"   -> Recording semantic 'MusicalIdea' annotation to Fulcra...")
+            # Fetch the exact UUID of the user's `MusicalIdea` data type dynamically
+            print("6. Looking up user's MusicalIdea data type UUID...")
+            type_res = subprocess.run(["uvx", "fulcra-api", "data-type", "list"], capture_output=True, text=True, check=True)
+            musical_idea_uuid = None
+            for line in type_res.stdout.split('\n'):
+                if "MusicalIdea" in line:
+                    musical_idea_uuid = line.split()[0].strip()
+                    break
+            
+            if not musical_idea_uuid:
+                print("❌ Error: MusicalIdea data type not found in this Fulcra account. Cannot upload semantic record.")
+                return
             # Pipe an empty JSON object into the CLI to satisfy the input requirement
-            cmd = f"echo '{{}}' | uvx fulcra-api record MomentAnnotation/c4480f1a-b80e-45b1-9eaa-190bf564485c --note 'Extracted from {session_filename}. File: {idea_fulcra}' --tag 'key:{detected_key}' --tag 'bpm:{detected_bpm}' --tag 'flow-state-app'"
+            cmd = f"echo '{{}}' | uvx fulcra-api record MomentAnnotation/{musical_idea_uuid} --note 'Extracted from {session_filename}. File: {idea_fulcra}' --tag 'key:{detected_key}' --tag 'bpm:{detected_bpm}' --tag 'flow-state-app'"
             subprocess.run(cmd, shell=True, check=True)
             
             if os.path.exists(idea_wav):

@@ -75,13 +75,24 @@ def get_latest_marker():
 @app.get("/api/ideas")
 def get_ideas():
     try:
-        # 1. Fetch tags
+        # 1. Fetch the exact UUID of the user's `MusicalIdea` data type dynamically
+        type_res = subprocess.run(["uvx", "fulcra-api", "data-type", "list"], capture_output=True, text=True, check=True)
+        musical_idea_uuid = None
+        for line in type_res.stdout.split('\n'):
+            if "MusicalIdea" in line:
+                musical_idea_uuid = line.split()[0].strip()
+                break
+                
+        if not musical_idea_uuid:
+            return {"error": "MusicalIdea data type not found in this Fulcra account."}
+        
+        # 2. Fetch tags for label resolution
         tags_res = subprocess.run(["uvx", "fulcra-api", "tag", "list"], capture_output=True, text=True, check=True)
-        tags_data = json.loads(tags_res.stdout)
+        tags_data = json.loads(tags_res.stdout) if tags_res.stdout.strip() else []
         tag_lookup = {t['id']: t['name'] for t in tags_data}
         
-        # 2. Fetch records
-        records_res = subprocess.run(["uvx", "fulcra-api", "get-records", "MomentAnnotation/c4480f1a-b80e-45b1-9eaa-190bf564485c", "30 days"], capture_output=True, text=True)
+        # 3. Fetch records using the dynamic UUID
+        records_res = subprocess.run(["uvx", "fulcra-api", "get-records", f"MomentAnnotation/{musical_idea_uuid}", "30 days"], capture_output=True, text=True)
         if records_res.returncode != 0:
             return {"error": f"Failed to fetch records: {records_res.stderr}"}
         
