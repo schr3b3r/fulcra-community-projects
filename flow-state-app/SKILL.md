@@ -19,8 +19,8 @@ Because this is a locally-hosted web application that relies on the Fulcra API, 
 Follow these steps exactly, in order:
 
 ### 1. Verify Fulcra Authentication
-Run `uvx fulcra-api auth status`. 
-If the user is not authenticated, instruct them to authenticate first before continuing. Do not proceed until they confirm they are logged in.
+Run `uvx fulcra-api auth print-access-token` or `uvx fulcra-api user-info` to verify the user has active credentials. 
+If it fails or returns an error, the user is not authenticated. Instruct them to authenticate first by running `uvx fulcra-api auth login --get-auth-url` and following the device code flow. Do not proceed until they confirm they are logged in.
 
 ### 2. Provision the Fulcra Data Type
 The web app requires a custom Fulcra data type to store the extracted ideas.
