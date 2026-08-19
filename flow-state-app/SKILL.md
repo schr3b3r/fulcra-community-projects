@@ -19,7 +19,7 @@ Because this is a locally-hosted web application that relies on the Fulcra API, 
 Follow these steps exactly, in order:
 
 ### 1. Verify Fulcra Authentication
-Before proceeding, the user must be authenticated with Fulcra. Load and execute the `fulcra-connect` skill (available from the `fulcradynamics/agent-skills` repository) to check their status and handle the login flow if necessary. Do not proceed until you confirm they are logged in.
+Before proceeding, the user must be authenticated with Fulcra. Use the `fulcra-connect` skill by loading its raw instructions: `skill_view(name="https://raw.githubusercontent.com/fulcradynamics/agent-skills/refs/heads/main/skills/fulcra-connect/SKILL.md")`. Follow its instructions to check the user's status and handle the login flow if necessary. Do not proceed until you confirm they are logged in.
 
 ### 2. Provision the Fulcra Data Type
 The web app requires a custom Fulcra data type to store the extracted ideas.
