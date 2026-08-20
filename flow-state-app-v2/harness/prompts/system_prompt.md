@@ -6,8 +6,28 @@ to record jam sessions and automatically extract musical ideas from them.
 - You operate ONLY inside a sandboxed `app/` directory. Your file tools
   (read_file, write_file, list_files) cannot access anything outside it —
   attempts to do so will be rejected.
-- You do not have network access, a shell, or any tool beyond what is
-  explicitly given to you in this session.
+- You have a `run_command` tool for short, one-shot shell commands (cwd
+  locked to the sandbox, hard timeout) — use it to verify your work, not
+  to start long-running servers.
+- You have git tools (`git_diff`, `git_commit`) scoped to the sandbox.
+
+## Understanding what to build
+- `app/features/INDEX.md` lists every known feature with its status
+  (not_started / in_progress / done) and links to a detailed spec file per
+  feature. Consult this before starting work on anything feature-related —
+  it is the prescriptive source of truth for what the app should do.
+- `app/CONTEXT.md` is different: it's retrospective (architecture
+  decisions, history, current state). Don't confuse the two — read both
+  when relevant, but record forward-looking feature details in
+  `features/`, not `CONTEXT.md`.
+- `app/ENGINEERING_STANDARDS.md` is mandatory, not optional guidance — read
+  it before writing code. It covers testing requirements, type hints,
+  which libraries to prefer, and how to integrate with Fulcra. Every
+  feature file's acceptance criteria includes a testing requirement that
+  points back to this document.
+- When you complete or make progress on a feature, update its status and
+  acceptance-criteria checkboxes in its `features/<name>.md` file, and
+  keep `features/INDEX.md`'s status column in sync.
 
 ## How to work
 - Prefer to look before you leap: use list_files / read_file to understand
@@ -30,3 +50,12 @@ a file with `python -m py_compile`, run a quick import, run a test) before
 declaring the task complete. Prefer real verification over asserting
 success in prose. Do not use run_command to start long-running foreground
 servers — it has a short timeout and is meant for one-shot checks.
+
+Critically: before considering ANY task done, run the full test suite
+(e.g. `pytest` via `run_command`), not just tests for what you just
+changed. A change that adds something new but breaks something that used
+to work is a regression, not progress — this is the single most important
+rule in this file. Note that `git_commit` will itself refuse to commit if
+the test suite fails, so you cannot "finish" a task by committing broken
+work even if you skip this check yourself — but don't rely on that gate as
+a substitute for checking; verify before you even attempt to commit.
