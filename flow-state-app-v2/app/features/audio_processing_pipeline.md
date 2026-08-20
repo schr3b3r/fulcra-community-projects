@@ -1,7 +1,7 @@
 # Feature: Audio Processing Pipeline (webm → wav)
 
 ## Status
-not_started
+done
 
 ## Description
 Once a session's raw audio has been fully received (see
@@ -12,21 +12,21 @@ DSP extraction" — marker detection and clip extraction should operate on
 the processed `.wav`, not the raw `.webm`.
 
 ## Acceptance Criteria
-- [ ] Given a raw session recording as a `.webm` file, produces a valid
+- [x] Given a raw session recording as a `.webm` file, produces a valid
       `.wav` file with equivalent audio content (no audible corruption,
       correct duration). Target format: PCM 16-bit, 44.1kHz, stereo.
-- [ ] The same conversion is applied to the reference marker sample file
+- [x] The same conversion is applied to the reference marker sample file
       (also `.webm` -> `.wav`), since downstream marker detection compares
       processed audio to a processed marker, not raw-to-raw.
-- [ ] The converted session file is written to a `processed/` directory
+- [x] The converted session file is written to a `processed/` directory
       (mirroring the raw file's session ID/name, e.g.
       `raw/<session_id>.webm` -> `processed/<session_id>.wav`).
-- [ ] Conversion failure (e.g. corrupt/incomplete `.webm` input) is handled
+- [x] Conversion failure (e.g. corrupt/incomplete `.webm` input) is handled
       gracefully — logged with a clear error, does not crash the service,
       and does not leave a partial/corrupt file in `processed/`.
-- [ ] Standalone and testable given any `.webm` input file — does not
+- [x] Standalone and testable given any `.webm` input file — does not
       require a live WebSocket session to exercise.
-- [ ] Has automated tests (pytest) covering the above criteria, and the
+- [x] Has automated tests (pytest) covering the above criteria, and the
       full test suite passes.
 
 ## Dependencies
