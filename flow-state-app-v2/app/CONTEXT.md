@@ -6,10 +6,9 @@ whenever you make an architectural decision, pivot, or complete a
 significant milestone — so the next task (run by you or a future agent) has
 accurate context without needing to re-derive it from the diff history.
 
-This is a sibling document to `../../flow-state-app/CONTEXT.md` (the
-original v1 app) but tracks THIS app's own state, not v1's. Consult v1's
-CONTEXT.md for product background and prior architectural learnings, but
-record new decisions here.
+This project is independent: it does not reference or depend on any other
+app's code, files, or context. Record all decisions relevant to this app
+here.
 
 ## The Product
 A web app for musicians to record long jam sessions. Instead of clicking a
