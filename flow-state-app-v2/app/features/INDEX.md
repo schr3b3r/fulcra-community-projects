@@ -8,13 +8,13 @@ status changes.
 | Feature | Status | Description |
 |---|---|---|
 | [backend_skeleton](./backend_skeleton.md) | done | Minimal FastAPI app with health-check and root endpoints. |
-| [websocket_audio_streaming](./websocket_audio_streaming.md) | not_started | Stream audio from the browser to the backend over WebSockets in small chunks, saved to disk in real time. |
+| [websocket_audio_streaming](./websocket_audio_streaming.md) | done | Stream audio from the browser to the backend over WebSockets in small chunks, saved to disk in real time. |
 | [audio_processing_pipeline](./audio_processing_pipeline.md) | not_started | Convert a raw uploaded `.webm` session to `.wav` and write it to `processed/`. |
 | [processing_status_tracking](./processing_status_tracking.md) | not_started | Track each file's pipeline lifecycle (received/processing/failed/published) as queryable Fulcra annotation data. |
 | [audio_marker_detection](./audio_marker_detection.md) | not_started | Detect a specific audio marker (e.g. a chord) within a processed session recording. |
 | [dsp_idea_extraction](./dsp_idea_extraction.md) | not_started | Extract a 15-second clip around a detected marker and tag it with Key and BPM. |
 | [musical_idea_publishing](./musical_idea_publishing.md) | not_started | Push an extracted musical idea to Fulcra (via SDK) for storage and later retrieval. |
-| [recording_frontend](./recording_frontend.md) | not_started | SvelteKit UI to capture audio, stream it to the backend, and review extracted ideas afterward. |
+| [recording_frontend](./recording_frontend.md) | in_progress | SvelteKit UI to capture audio, stream it to the backend, and review extracted ideas afterward. |
 
 ## Status values
 - `not_started` — described but no work done yet.

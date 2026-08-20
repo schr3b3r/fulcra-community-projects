@@ -16,5 +16,17 @@ harness/state/runs/
 app/.pytest_cache/
 app/**/__pycache__/
 
+# Runtime session data written by the WebSocket audio streaming endpoint
+# (see app/features/websocket_audio_streaming.md) -- not source, shouldn't
+# be committed.
+app/raw/
+app/processed/
+
+# SvelteKit frontend (recording_frontend.md) -- standard Node/SvelteKit
+# build artifacts, never committed.
+frontend/node_modules/
+frontend/.svelte-kit/
+frontend/build/
+
 # OS
 .DS_Store
