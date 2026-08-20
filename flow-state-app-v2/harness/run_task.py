@@ -31,7 +31,7 @@ def main():
     task = load_task(task_filename)
 
     print(f"--- Running task: {task_filename} ---\n")
-    result = run(task=task, max_iterations=15)
+    result = run(task=task, max_iterations=30)
 
     print("\n" + "=" * 60)
     print("RUN SUMMARY")

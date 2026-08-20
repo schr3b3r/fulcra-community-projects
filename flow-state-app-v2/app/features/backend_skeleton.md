@@ -15,12 +15,10 @@ the service runs and can be health-checked.
 - [x] `requirements.txt` lists the minimal dependencies (fastapi, uvicorn).
 - [x] Server actually starts and both endpoints were verified live (not
       just claimed) via a real HTTP request.
-- [ ] Has automated tests (pytest) covering the above criteria, and the
-      full test suite passes. **Known debt**: this feature predates the
-      "every feature has automated tests" standard and currently has none.
-      Should be backfilled with a basic pytest test (e.g. via FastAPI's
-      TestClient) the next time this feature is touched, rather than
-      retroactively marking this criterion done without real tests.
+- [x] Has automated tests (pytest) covering the above criteria, and the
+      full test suite passes. Backfilled in `tests/test_main.py` as part
+      of the `audio_processing_pipeline` task (which also introduced
+      `pytest.ini` and got the test suite running for the first time).
 
 ## Dependencies
 none
@@ -29,7 +27,5 @@ none
 Built via the harness's first real (non-smoke-test) task run. Verified by
 independently installing requirements and curling both endpoints.
 
-Status remains `done` despite the missing test criterion above — the
-feature genuinely works and was verified live, but the testing standard
-was introduced after this feature was built. Left as visible, honest debt
-rather than silently checked off.
+Previously had known test debt (see git history) — backfilled with
+`tests/test_main.py` once a real test suite existed for the project.
