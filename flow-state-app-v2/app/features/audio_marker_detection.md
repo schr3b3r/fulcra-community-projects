@@ -66,6 +66,27 @@ t≈38.59s, matching the documented ground truth. Later wired into
 `pipeline.py` and verified through the actual running WebSocket server,
 not just in isolation.
 
+**Real bug found via live user testing, fixed:** the fixed-`top_db`
+silence trim on the marker sample worked fine for the clean,
+high-dynamic-range committed test fixtures, but a real marker recording
+captured through a quieter/lower-dynamic-range mic could have almost its
+entire duration fall within `top_db` of its own peak amplitude -- e.g.
+one real recording trimmed down to ~0.58s. A reference clip that short
+isn't distinctive enough to correlate against reliably, and produced 4
+"detections" in a session where the marker was actually played only
+once (confirmed directly with the user after listening back to their
+recording). Fixed with an adaptive relaxation in `_trim_marker`: if the
+initial trim leaves less than `min_marker_duration_seconds` (default
+1.0s) of audio, progressively relax `top_db` until either a long-enough
+clip results or a relaxation ceiling is hit (falling back to the
+untrimmed, normalized recording as a last resort). Confirmed against
+the user's real session: 4 detections -> 1, matching what they actually
+played. Regression test added
+(`test_quiet_marker_recording_does_not_trim_to_near_nothing`) using a
+synthetic low-dynamic-range signal, since the existing high-quality
+fixtures don't exercise this path at all (confirmed: the fix is
+additive and doesn't change fixture-based test results).
+
 ## Dependencies
 audio_processing_pipeline.md (operates on the processed `.wav` for both
 the session and the marker sample, not the raw `.webm`)

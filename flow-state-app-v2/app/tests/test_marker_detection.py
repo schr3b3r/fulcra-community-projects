@@ -121,3 +121,54 @@ def test_session_shorter_than_marker_returns_no_matches(
 
     timestamps = detect_marker(short_session_path, processed_fixtures["marker"])
     assert timestamps == []
+
+
+def test_quiet_marker_recording_does_not_trim_to_near_nothing() -> None:
+    """Regression test for a real bug found via live testing: a marker
+    recording with low dynamic range (e.g. a laptop mic in a quiet room)
+    could have almost its entire duration within `top_db` of its own
+    peak amplitude, silence-trimming it down to a fraction of a second.
+    A reference clip that short isn't distinctive enough to correlate
+    against reliably -- observed directly as 4 "marker detections" in a
+    real session where the marker was actually only played once, because
+    the ~0.6s trimmed clip spuriously matched other short transients.
+
+    This test constructs a synthetic low-dynamic-range signal (a short
+    tone that only briefly, sharply peaks above an otherwise fairly loud
+    "floor") that reproduces the too-aggressive trim with the naive
+    approach, and confirms the detector's adaptive relaxation keeps at
+    least `min_marker_duration_seconds` of audio instead.
+    """
+    import numpy as np
+
+    sr = 22050
+    duration_seconds = 4.0
+    t = np.linspace(0, duration_seconds, int(sr * duration_seconds), endpoint=False)
+
+    # A quiet, low-dynamic-range tone: floor amplitude 0.3 throughout,
+    # with a single brief sharp peak at amplitude 1.0 lasting ~50ms.
+    # Naive top_db=25 silence trimming, relative to the 1.0 peak, treats
+    # everything below ~0.056 as silence -- the floor here (0.3) is well
+    # above that, so a naive per-sample-energy trim wouldn't cut this
+    # down at all by amplitude alone. To reproduce the real failure mode
+    # (RMS-based trim on a signal that's mostly quiet relative to one
+    # sharp transient), make the floor very quiet and only the brief
+    # spike loud.
+    floor_amplitude = 0.02
+    y = floor_amplitude * np.sin(2 * np.pi * 220 * t)
+    spike_start = int(sr * 2.0)
+    spike_len = int(sr * 0.05)
+    y[spike_start : spike_start + spike_len] += 1.0 * np.sin(
+        2 * np.pi * 880 * t[spike_start : spike_start + spike_len]
+    )
+    y = y.astype("float32")
+
+    detector = MFCCCorrelationDetector(min_marker_duration_seconds=1.0)
+    y_normalized = y / np.max(np.abs(y))
+    trimmed = detector._trim_marker(y_normalized, sr)
+
+    assert len(trimmed) / sr >= 1.0, (
+        f"Expected adaptive relaxation to keep >= 1.0s of audio, got "
+        f"{len(trimmed) / sr:.2f}s -- the too-short-reference-clip bug "
+        f"may have regressed."
+    )

@@ -220,6 +220,16 @@ def get_published_ideas(
     """Query back published MusicalIdea records in a time range, decoding
     their JSON metadata payload.
 
+    Only understands this codebase's own record format (a JSON-encoded
+    metadata dict in the `note` field). A prior implementation of this
+    same concept stored records differently (plain-text note + separate
+    tags) -- those are intentionally not parsed here. Mixing support for
+    an old, different codebase's data shape into this one wasn't judged
+    worth the added complexity for what is a small, fixed number of
+    legacy records; if those ever need to show up in this app's review
+    feed, migrate them once (re-publish in this format) rather than
+    carrying a permanent compatibility parser.
+
     Args:
         client: an authenticated FulcraAPI client.
         start_time: range start (ISO string or datetime).
@@ -244,6 +254,8 @@ def get_published_ideas(
         try:
             metadata = json.loads(note)
         except json.JSONDecodeError:
+            continue
+        if not isinstance(metadata, dict):
             continue
         metadata["recorded_at"] = record.get("recorded_at")
         ideas.append(metadata)
