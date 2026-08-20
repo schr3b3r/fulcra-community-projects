@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 
 from harness.providers.gemini import call_model
 from harness.prompts import load_system_prompt
+from harness.tools import ALL_TOOLS
 
 
 MAX_ITERATIONS = 10
@@ -49,8 +50,9 @@ def run(
         task: the user's task description, becomes the first user message.
         system_prompt: instructions for the model, sent on every call. If
             None (the default), loads harness/prompts/system_prompt.md.
-        tools: a {name: (callable, schema)} registry, e.g. filesystem.TOOLS.
-            If None, no tools are made available (plain chat mode).
+        tools: a {name: (callable, schema)} registry. If None (the default),
+            uses the full harness.tools.ALL_TOOLS registry. Pass an empty
+            dict explicitly ({}) for plain chat mode with no tools at all.
         max_iterations: hard cap on model round-trips, to prevent runaway
             loops.
         verbose: print progress as it happens.
@@ -60,7 +62,8 @@ def run(
     """
     if system_prompt is None:
         system_prompt = load_system_prompt()
-    tools = tools or {}
+    if tools is None:
+        tools = ALL_TOOLS
     messages: list[dict] = [{"role": "user", "content": task}]
 
     for iteration in range(1, max_iterations + 1):

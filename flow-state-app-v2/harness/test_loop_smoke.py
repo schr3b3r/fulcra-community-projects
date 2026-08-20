@@ -15,18 +15,22 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from harness.loop import run
-from harness.tools.filesystem import TOOLS
+from harness.tools.filesystem import TOOLS as FILESYSTEM_TOOLS
 
 
 def main():
     print("--- Smoke test: force a real write_file tool call ---")
+    # Deliberately scoped to filesystem-only tools for this test: giving it
+    # the full ALL_TOOLS registry (including git_commit) caused it to
+    # autonomously commit its own test output during a prior run — a real,
+    # useful discovery, but not what we want happening on every test run.
     result = run(
         task=(
             "Create a file called 'greeting.txt' inside the sandbox with "
             "the exact content 'Hello from the harness control loop.' "
             "Then confirm you did it."
         ),
-        tools=TOOLS,
+        tools=FILESYSTEM_TOOLS,
     )
 
     print("\n=== RUN RESULT ===")

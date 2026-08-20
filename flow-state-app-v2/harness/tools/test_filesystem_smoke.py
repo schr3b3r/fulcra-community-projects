@@ -3,11 +3,12 @@ Standalone smoke test for the filesystem tools, with an emphasis on proving
 the sandbox boundary actually holds — this is the part that matters most,
 since a bug here means the agent could write outside app/.
 
-Run directly:
-    .venv/bin/python harness/tools/test_filesystem_smoke.py
+Run directly (this needs to be run as a module so package-relative imports
+resolve, matching how the other harness tests are run):
+    .venv/bin/python -m harness.tools.test_filesystem_smoke
 """
 
-from filesystem import (
+from harness.tools.filesystem import (
     SANDBOX_ROOT,
     SandboxViolation,
     list_files,
