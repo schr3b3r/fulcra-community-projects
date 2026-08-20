@@ -2,10 +2,21 @@ import asyncio
 import logging
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
+from fulcra_client import FulcraAuthError, get_fulcra_client
+from idea_publishing import PublishingError
 from pipeline import process_completed_session, process_marker_recording
+from review_api import (
+    AudioNotFoundError,
+    download_idea_audio_from_fulcra,
+    download_session_audio_from_fulcra,
+    get_current_marker_info,
+    list_review_ideas,
+    local_idea_clip_path,
+    local_processed_audio_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +60,97 @@ def read_root():
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
+
+@app.get("/api/marker")
+def api_get_current_marker():
+    """Info about the currently active marker sample (the one new
+    session recordings get detected against), or a clear "none yet"
+    response if no marker has been recorded."""
+    marker_info = get_current_marker_info()
+    if marker_info is None:
+        return {"marker": None}
+    return {"marker": marker_info}
+
+
+@app.get("/api/ideas")
+def api_list_ideas():
+    """List published musical ideas for the review feed."""
+    try:
+        client = get_fulcra_client()
+    except FulcraAuthError as exc:
+        raise HTTPException(status_code=503, detail=f"Fulcra not available: {exc}")
+
+    try:
+        ideas = list_review_ideas(client)
+    except PublishingError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to list ideas: {exc}")
+
+    return {"ideas": ideas}
+
+
+@app.get("/api/audio/session/{session_id}")
+def api_get_session_audio(session_id: str):
+    """Stream a processed session (or marker) recording's audio for
+    playback in the browser, e.g. via wavesurfer.js. Prefers the local
+    copy (fast path); falls back to Fulcra if the local file no longer
+    exists (e.g. after a server restart -- local disk is a cache, not the
+    durable copy)."""
+    try:
+        path = local_processed_audio_path(session_id)
+        return Response(content=path.read_bytes(), media_type="audio/wav")
+    except AudioNotFoundError:
+        pass
+
+    try:
+        client = get_fulcra_client()
+    except FulcraAuthError as exc:
+        raise HTTPException(status_code=503, detail=f"Fulcra not available: {exc}")
+
+    try:
+        audio_bytes = download_session_audio_from_fulcra(client, session_id)
+    except AudioNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    return Response(content=audio_bytes, media_type="audio/wav")
+
+
+@app.get("/api/audio/idea/{idea_id}")
+def api_get_idea_audio(idea_id: str):
+    """Stream an extracted idea clip's audio for playback. Prefers the
+    local copy (fast path, immediately after extraction); falls back to
+    downloading it from Fulcra if the local file no longer exists (e.g.
+    after a server restart, since local disk isn't the durable copy --
+    Fulcra is)."""
+    try:
+        path = local_idea_clip_path(idea_id)
+        return Response(content=path.read_bytes(), media_type="audio/wav")
+    except AudioNotFoundError:
+        pass
+
+    try:
+        client = get_fulcra_client()
+    except FulcraAuthError as exc:
+        raise HTTPException(status_code=503, detail=f"Fulcra not available: {exc}")
+
+    try:
+        ideas = list_review_ideas(client)
+    except PublishingError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to look up idea: {exc}")
+
+    matching = next(
+        (idea for idea in ideas if idea.get("idea_id") == idea_id),
+        None,
+    )
+    if matching is None:
+        raise HTTPException(status_code=404, detail=f"Idea not found: {idea_id!r}")
+
+    try:
+        audio_bytes = download_idea_audio_from_fulcra(client, matching["file_path"])
+    except AudioNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    return Response(content=audio_bytes, media_type="audio/wav")
 
 
 def _raw_session_path(session_id: str) -> Path:

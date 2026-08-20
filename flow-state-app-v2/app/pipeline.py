@@ -20,7 +20,7 @@ from audio import (
     extract_musical_idea,
 )
 from fulcra_client import FulcraAuthError, get_fulcra_client
-from idea_publishing import PublishingError, publish_musical_idea
+from idea_publishing import PublishingError, publish_musical_idea, upload_session_audio
 from status_tracking import StatusTrackingError, record_status
 
 logger = logging.getLogger(__name__)
@@ -109,6 +109,15 @@ def process_marker_recording(
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     CURRENT_MARKER_POINTER.write_text(str(processed_path))
 
+    try:
+        client = get_fulcra_client()
+        upload_session_audio(client, processed_path, session_id)
+    except (FulcraAuthError, PublishingError) as exc:
+        # Non-fatal: the marker still works locally for detection even if
+        # the durable upload fails; just log/notify, don't fail the stage.
+        logger.warning("Could not upload marker audio to Fulcra: %s", exc)
+        _notify(on_progress, f"Warning: marker audio not durably stored ({exc}).")
+
     _safe_record_status(session_id, stage="processed")
     _notify(on_progress, "Marker ready for future session detection.")
     return processed_path
@@ -150,6 +159,16 @@ def process_completed_session(
         return []
 
     _safe_record_status(session_id, stage="processed")
+
+    try:
+        client = get_fulcra_client()
+        upload_session_audio(client, processed_session_wav, session_id)
+    except (FulcraAuthError, PublishingError) as exc:
+        # Non-fatal: detection/extraction still work against the local
+        # copy; just log/notify that durable storage of the raw session
+        # audio didn't happen this time.
+        logger.warning("Could not upload session audio to Fulcra: %s", exc)
+        _notify(on_progress, f"Warning: session audio not durably stored ({exc}).")
 
     marker_wav = find_latest_processed_marker()
     if marker_wav is None:
@@ -206,6 +225,7 @@ def process_completed_session(
                 bpm=extraction["bpm"],
                 session_id=session_id,
                 marker_timestamp_seconds=timestamp,
+                idea_id=idea_id,
             )
         except (FulcraAuthError, PublishingError) as exc:
             _safe_record_status(idea_id, stage="failed", error=str(exc))

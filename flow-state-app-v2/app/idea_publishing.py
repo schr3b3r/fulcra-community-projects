@@ -80,6 +80,7 @@ def publish_musical_idea(
     bpm: int,
     session_id: str,
     marker_timestamp_seconds: float,
+    idea_id: Optional[str] = None,
     fulcra_upload_path: Optional[str] = None,
 ) -> dict:
     """Upload an extracted clip and its metadata to Fulcra as a
@@ -93,6 +94,10 @@ def publish_musical_idea(
         session_id: the session this idea was extracted from.
         marker_timestamp_seconds: where in the session the marker (that
             triggered this extraction) was detected.
+        idea_id: a stable identifier for this idea (defaults to the
+            clip's filename stem), stored in the published metadata so
+            API consumers (e.g. the review frontend) don't need to parse
+            it back out of file_path themselves.
         fulcra_upload_path: where to upload the clip in Fulcra's file
             store. Defaults to "/flow-state/ideas/<clip filename>".
 
@@ -133,6 +138,7 @@ def publish_musical_idea(
         ) from exc
 
     metadata = {
+        "idea_id": idea_id or path.stem,
         "session_id": session_id,
         "marker_timestamp_seconds": marker_timestamp_seconds,
         "key": key,
@@ -161,6 +167,49 @@ def publish_musical_idea(
         "file_path": upload_path,
         "metadata": metadata,
     }
+
+
+def upload_session_audio(
+    client: FulcraAPI,
+    session_wav_path: PathLike,
+    session_id: str,
+) -> str:
+    """Upload a processed session (or marker) recording's .wav to Fulcra
+    for durable storage, independent of any MusicalIdea record.
+
+    Mirrors a prior implementation of this same concept, which uploaded
+    the processed session audio to Fulcra (not just the extracted idea
+    clips) so "Full Session Audio" review/playback survives local disk
+    being wiped (e.g. a server restart) -- local disk is a fast-path
+    cache, not the durable copy.
+
+    Returns:
+        The Fulcra path the file was uploaded to.
+
+    Raises:
+        PublishingError: if the upload fails.
+    """
+    path = Path(session_wav_path)
+    if not path.is_file():
+        raise PublishingError(f"Session audio file not found: {path}")
+
+    upload_path = f"/flow-state/sessions/{session_id}.wav"
+
+    try:
+        with open(path, "rb") as f:
+            file_size = path.stat().st_size
+            client.upload_file(
+                data=f,
+                file_type="audio/wav",
+                file_size=file_size,
+                filepath=upload_path,
+            )
+    except Exception as exc:
+        raise PublishingError(
+            f"Failed to upload session audio {path} to Fulcra at {upload_path}: {exc}"
+        ) from exc
+
+    return upload_path
 
 
 def get_published_ideas(

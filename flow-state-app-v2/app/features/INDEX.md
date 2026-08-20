@@ -14,7 +14,7 @@ status changes.
 | [audio_marker_detection](./audio_marker_detection.md) | done | Detect a specific audio marker (e.g. a chord) within a processed session recording. |
 | [dsp_idea_extraction](./dsp_idea_extraction.md) | done | Extract a 15-second clip around a detected marker and tag it with Key and BPM. |
 | [musical_idea_publishing](./musical_idea_publishing.md) | done | Push an extracted musical idea to Fulcra (via SDK) for storage and later retrieval. |
-| [recording_frontend](./recording_frontend.md) | in_progress | SvelteKit UI to capture audio, stream it to the backend, and review extracted ideas afterward. |
+| [recording_frontend](./recording_frontend.md) | done | SvelteKit UI to capture audio, stream it to the backend, and review extracted ideas afterward. |
 
 ## Status values
 - `not_started` — described but no work done yet.

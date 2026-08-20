@@ -18,13 +18,17 @@ clip, tags it with Key and BPM, and pushes it to a data platform as a
 "MusicalIdea".
 
 ## Current State
-- `main.py`: FastAPI app with `GET /`, `GET /health`, and a WebSocket
-  endpoint `/ws/record/{session_id}?mode=session|marker`. Appends binary
-  chunks to `raw/<session_id>.webm` as they arrive; a client text message
-  `"STOP"` (not closing the socket) signals end-of-recording, after which
-  the endpoint runs `pipeline.py`'s full processing pipeline in a worker
-  thread and streams progress messages back before closing the
-  connection itself. CORS enabled for the SvelteKit dev server origin.
+- `main.py`: FastAPI app with `GET /`, `GET /health`, a WebSocket
+  endpoint `/ws/record/{session_id}?mode=session|marker`, and four
+  read-only review endpoints: `GET /api/marker`, `GET /api/ideas`,
+  `GET /api/audio/session/{id}`, `GET /api/audio/idea/{id}` (each prefers
+  local disk, falls back to Fulcra if the local copy is gone). The
+  WebSocket endpoint appends binary chunks to `raw/<session_id>.webm` as
+  they arrive; a client text message `"STOP"` (not closing the socket)
+  signals end-of-recording, after which the endpoint runs `pipeline.py`'s
+  full processing pipeline in a worker thread and streams progress
+  messages back before closing the connection itself. CORS enabled for
+  the SvelteKit dev server origin.
 - `audio/` package: `processor.py` (webm->wav via ffmpeg),
   `marker_detection.py` (MFCC-correlation marker detection behind a
   swappable `MarkerDetector` interface), `dsp_extraction.py` (15s
@@ -35,23 +39,39 @@ clip, tags it with Key and BPM, and pushes it to a data platform as a
   MomentAnnotation records (JSON note payload + `stage:<stage>` tag).
 - `idea_publishing.py`: uploads extracted clips and publishes them as
   `MusicalIdea` records (reusing the type already provisioned by the
-  prior v1 app in this Fulcra account).
+  prior v1 app in this Fulcra account); also uploads processed
+  session/marker audio to Fulcra (`upload_session_audio`) for durable
+  "Full Session Audio" playback independent of any extracted idea.
+- `review_api.py`: read-only helpers backing the review endpoints --
+  listing published ideas, current-marker info, resolving local vs.
+  Fulcra-backed audio paths.
 - `pipeline.py`: orchestrates all of the above into
   `process_marker_recording()` and `process_completed_session()`, called
   by `main.py` once a recording finishes.
 - `requirements.txt`: fastapi, uvicorn (librosa/numpy/scipy/soundfile
   come from the harness's own `.venv`, already present).
-- `frontend/`: a minimal SvelteKit app (Svelte 5, TypeScript) with one
-  page (`src/routes/+page.svelte`): Record/Stop buttons that capture mic
-  audio via `getUserMedia` + `MediaRecorder`, stream it to the backend
-  WebSocket, send `"STOP"` on Stop (instead of closing), and display
-  progress messages received back. No styling, no review view yet.
+- `frontend/`: a SvelteKit app (Svelte 5, TypeScript, Tailwind v4,
+  wavesurfer.js) with two routes: `/` (record page -- Session/Marker mode
+  toggle, big circular record/stop button, live progress log, "Current
+  Marker" accordion with waveform playback) and `/review` (review feed --
+  published ideas grouped by session, each with its own waveform +
+  Key/BPM tags, plus the full session waveform with the marker's lookback
+  window highlighted as a region). Mirrors v1's UX, rebuilt as native
+  Svelte components rather than ported vanilla JS/HTML. `$lib/api.ts`
+  centralizes backend API calls/types; `$lib/WaveformPlayer.svelte` is a
+  reusable wavesurfer wrapper used by both routes.
 - Full backend pipeline (record -> convert -> detect marker -> extract
-  idea -> publish to Fulcra) is built, tested (40/40 pytest, several
-  against the real authenticated Fulcra account), and verified live
-  end-to-end through the actual running WebSocket server -- not just unit
-  tests. What's NOT done yet: the frontend has no marker-recording mode
-  or review/playback view (v1 parity for the UI, not just the backend).
+  idea -> publish to Fulcra, including durable session-audio storage) and
+  the full frontend (recording UI + review feed) are built, tested
+  (58/58 pytest, many against the real authenticated Fulcra account), and
+  verified live end-to-end -- both through the actual running WebSocket
+  server and via a real headless-Chromium (Playwright) load of both
+  frontend routes against the live dev servers. v1 UX parity achieved.
+  What's NOT done yet: no checked-in browser-level (Playwright) automated
+  test suite for the frontend itself (verified manually/live instead);
+  no realtime marker detection (v1 also deferred this); production
+  frontend deployment shape (static export vs. separate Node process)
+  still an open decision, irrelevant to local dev.
 
 See `features/INDEX.md` for the full, structured feature spec — what the
 app is supposed to do, broken into individually-scoped features with
@@ -64,7 +84,32 @@ yet started. Consult both, but don't duplicate one into the other.
 (Newest at the top. One entry per meaningful decision — not a full
 chronological journal, just high-signal architectural notes.)
 
-- **(this entry)** Built the remaining backend pipeline features
+- **(this entry)** Rebuilt the frontend to mirror v1's actual UX (dark
+  theme, Session/Marker mode toggle, big record button, live log,
+  "Current Marker" accordion, Review Ideas feed grouped by session with
+  per-idea waveforms + Key/BPM tags and a full-session waveform with the
+  marker's lookback window highlighted), as native Svelte
+  components/routes rather than porting v1's vanilla JS/HTML wholesale.
+  Added Tailwind v4 and wavesurfer.js to the frontend. Two routes: `/`
+  (record) and `/review` (review feed), sharing `$lib/api.ts` (typed
+  backend client) and `$lib/WaveformPlayer.svelte` (reusable wavesurfer
+  wrapper). Backend gained four review-facing endpoints (`/api/marker`,
+  `/api/ideas`, `/api/audio/session/{id}`, `/api/audio/idea/{id}`), each
+  preferring local disk and falling back to Fulcra if the local copy is
+  gone. Discovered mid-build that the pipeline never durably stored
+  processed session/marker audio in Fulcra (only extracted idea clips
+  were uploaded) -- v1 did upload full session audio too, and the review
+  feed's "Full Session Audio" playback needs that durability. Fixed by
+  adding `upload_session_audio()` and wiring it into both
+  `process_marker_recording()` and `process_completed_session()`.
+  Verified by deleting the local processed `.wav` after a real pipeline
+  run and confirming `/api/audio/session/{id}` still served correct audio
+  via the Fulcra fallback. Also verified the actual rendered frontend
+  (not just API responses) using a real headless-Chromium session
+  (Playwright, installed for this verification only, not added as a
+  project dependency) against the live dev servers, confirming both
+  routes render real data with correct waveform durations.
+- **(previous)** Built the remaining backend pipeline features
   (`audio_marker_detection`, `dsp_idea_extraction`,
   `processing_status_tracking`, `musical_idea_publishing`) and wired them
   together in `pipeline.py`, called automatically from the WebSocket
