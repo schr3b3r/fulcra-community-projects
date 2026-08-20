@@ -15,9 +15,15 @@ Gemini's SDK uses "user" / "model" instead of "user" / "assistant", and
 expects `Content` objects rather than plain dicts — that translation happens
 entirely inside `call_model`.
 
-No tool-calling yet — this is deliberately the smallest possible slice: plain
-text in, plain text out, but already speaking in the shape the rest of the
-harness will use once tools are added.
+Tool-calling: callers pass `tools` as our own registry format —
+    {"tool_name": (callable, schema_dict), ...}
+(see harness/tools/filesystem.py) — where `schema_dict` looks like:
+    {"name": ..., "description": ..., "parameters": {<JSON schema>}}
+This adapter translates that into Gemini's `FunctionDeclaration`/`Tool`
+objects, and translates any function-call parts in the response back into
+our normalized `tool_calls` list:
+    [{"name": "read_file", "args": {"path": "main.py"}}, ...]
+The control loop never sees Gemini's native types on either side of the call.
 """
 
 from dataclasses import dataclass, field
@@ -34,8 +40,8 @@ DEFAULT_MODEL = "gemini-3.6-flash"
 class ModelResponse:
     """Normalized result of a single call to the model.
 
-    `tool_calls` is unused for now (always empty) — it's here so the shape
-    doesn't need to change again once we add tool support later.
+    `tool_calls` is a list of {"name": str, "args": dict} — empty if the
+    model didn't ask to call anything this turn.
     """
     text: str | None
     tool_calls: list = field(default_factory=list)
@@ -66,10 +72,27 @@ def _to_gemini_contents(messages: list[dict]) -> list[types.Content]:
     return contents
 
 
+def _to_gemini_tools(tools: dict | None) -> list[types.Tool] | None:
+    """Translate our {name: (callable, schema)} registry into Gemini Tools."""
+    if not tools:
+        return None
+    declarations = []
+    for _name, (_func, schema) in tools.items():
+        declarations.append(
+            types.FunctionDeclaration(
+                name=schema["name"],
+                description=schema.get("description", ""),
+                parameters=schema.get("parameters"),
+            )
+        )
+    return [types.Tool(function_declarations=declarations)]
+
+
 def call_model(
     messages: list[dict],
     system_prompt: str = "",
     model: str = DEFAULT_MODEL,
+    tools: dict | None = None,
 ) -> ModelResponse:
     """Send a conversation to Gemini and return a normalized response.
 
@@ -78,15 +101,21 @@ def call_model(
             [{"role": "user", "content": "hello"}]
         system_prompt: optional system instruction for this call.
         model: which Gemini model to use.
+        tools: optional {name: (callable, schema)} registry (see
+            harness/tools/filesystem.py). If provided, the model may request
+            calls to these tools instead of (or alongside) returning text.
 
     Returns:
-        ModelResponse with the model's reply text.
+        ModelResponse with the model's reply text and/or requested tool
+        calls.
     """
     client = _get_client()
     contents = _to_gemini_contents(messages)
+    gemini_tools = _to_gemini_tools(tools)
 
     config = types.GenerateContentConfig(
         system_instruction=system_prompt or None,
+        tools=gemini_tools,
     )
 
     response = client.models.generate_content(
@@ -95,9 +124,16 @@ def call_model(
         config=config,
     )
 
+    tool_calls = []
+    if response.candidates:
+        for part in response.candidates[0].content.parts or []:
+            fc = getattr(part, "function_call", None)
+            if fc is not None:
+                tool_calls.append({"name": fc.name, "args": dict(fc.args or {})})
+
     return ModelResponse(
-        text=response.text,
-        tool_calls=[],
+        text=response.text if not tool_calls else None,
+        tool_calls=tool_calls,
         stop_reason=getattr(response.candidates[0], "finish_reason", None)
         if response.candidates else None,
     )
