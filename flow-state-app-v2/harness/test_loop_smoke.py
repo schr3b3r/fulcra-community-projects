@@ -18,14 +18,6 @@ from harness.loop import run
 from harness.tools.filesystem import TOOLS
 
 
-SYSTEM_PROMPT = (
-    "You are a coding assistant with access to file tools scoped to a "
-    "sandbox directory. Use the tools when asked to read, write, or list "
-    "files. When you have completed the task, reply with a short plain-text "
-    "confirmation and do not call any more tools."
-)
-
-
 def main():
     print("--- Smoke test: force a real write_file tool call ---")
     result = run(
@@ -34,7 +26,6 @@ def main():
             "the exact content 'Hello from the harness control loop.' "
             "Then confirm you did it."
         ),
-        system_prompt=SYSTEM_PROMPT,
         tools=TOOLS,
     )
 

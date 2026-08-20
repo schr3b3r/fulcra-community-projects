@@ -21,6 +21,7 @@ does not know Gemini exists. If we ever add a second provider, only the
 from dataclasses import dataclass, field
 
 from harness.providers.gemini import call_model
+from harness.prompts import load_system_prompt
 
 
 MAX_ITERATIONS = 10
@@ -37,7 +38,7 @@ class RunResult:
 
 def run(
     task: str,
-    system_prompt: str = "",
+    system_prompt: str | None = None,
     tools: dict | None = None,
     max_iterations: int = MAX_ITERATIONS,
     verbose: bool = True,
@@ -46,7 +47,8 @@ def run(
 
     Args:
         task: the user's task description, becomes the first user message.
-        system_prompt: instructions for the model, sent on every call.
+        system_prompt: instructions for the model, sent on every call. If
+            None (the default), loads harness/prompts/system_prompt.md.
         tools: a {name: (callable, schema)} registry, e.g. filesystem.TOOLS.
             If None, no tools are made available (plain chat mode).
         max_iterations: hard cap on model round-trips, to prevent runaway
@@ -56,6 +58,8 @@ def run(
     Returns:
         A RunResult with the final text and the full message transcript.
     """
+    if system_prompt is None:
+        system_prompt = load_system_prompt()
     tools = tools or {}
     messages: list[dict] = [{"role": "user", "content": task}]
 
