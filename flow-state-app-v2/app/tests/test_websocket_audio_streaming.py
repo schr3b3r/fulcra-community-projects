@@ -194,3 +194,56 @@ def test_multiple_sessions_do_not_interfere(client: TestClient):
     path_b = RAW_SESSIONS_DIR / f"{session_b}.webm"
     assert path_a.read_bytes() == data_a
     assert path_b.read_bytes() == data_b
+
+
+def test_stop_message_ends_recording_without_closing_socket(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+):
+    """Sending a 'STOP' text message (not closing the socket) signals the
+    backend that recording is finished, keeping the connection open long
+    enough to receive progress messages from the processing pipeline --
+    the whole reason 'STOP' exists instead of just closing the socket
+    (see websocket_audio_streaming.md's Notes on this protocol update).
+
+    The real pipeline (ffmpeg/librosa/Fulcra) is swapped out for a fake
+    that just calls back with a progress message, so this test verifies
+    the protocol/wiring, not the pipeline's own behavior (which has its
+    own test coverage).
+    """
+    def fake_pipeline(session_id, on_progress=None):
+        if on_progress:
+            on_progress(f"fake progress for {session_id}")
+        return []
+
+    monkeypatch.setattr(main, "process_completed_session", fake_pipeline)
+
+    session_id = _new_session_id()
+    with client.websocket_connect(f"/ws/record/{session_id}") as ws:
+        ws.send_bytes(b"some audio bytes")
+        ws.send_text("STOP")
+
+        # The connection must still be open and deliver the pipeline's
+        # progress message -- if 'STOP' were treated like a close, this
+        # would hang or raise instead of receiving real data.
+        message = ws.receive_text()
+        assert message == f"fake progress for {session_id}"
+
+    written_path = RAW_SESSIONS_DIR / f"{session_id}.webm"
+    assert written_path.read_bytes() == b"some audio bytes"
+
+
+def test_stop_message_does_not_write_stop_text_into_audio_file(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+):
+    """The literal 'STOP' text message itself must never be written into
+    the audio file -- it's a control message, not audio data."""
+    monkeypatch.setattr(main, "process_completed_session", lambda *a, **k: [])
+
+    session_id = _new_session_id()
+    raw_bytes = MARKER_WEBM.read_bytes()
+    with client.websocket_connect(f"/ws/record/{session_id}") as ws:
+        ws.send_bytes(raw_bytes)
+        ws.send_text("STOP")
+
+    written_path = RAW_SESSIONS_DIR / f"{session_id}.webm"
+    assert written_path.read_bytes() == raw_bytes

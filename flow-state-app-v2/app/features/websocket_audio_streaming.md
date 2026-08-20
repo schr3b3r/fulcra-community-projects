@@ -34,16 +34,15 @@ prove the backend can receive and durably persist chunks over a WebSocket,
 which can be tested with any chunked binary input, not necessarily real
 recorded audio.
 
-**Sequencing note (this build pass):** built alongside a deliberately
-minimal slice of `recording_frontend.md` (record/stop buttons only, no
-review view) rather than after the full backend pipeline
-(processing/detection/DSP/publishing), so there's something clickable to
-test end-to-end sooner. See `recording_frontend.md`'s Notes for the
-reasoning. This feature's own acceptance criteria above are fully met on
-their own terms — the sequencing choice only affects *when* this was
-built relative to other backend features, not what was required of it.
-
-"Playable/valid" is verified by ffprobe-style structural validity of the
-received bytes (parseable WebM/Opus container), not by human listening —
-consistent with how `audio_processing_pipeline.md`'s conversion step will
-later validate its own output.
+**Protocol update (this build pass):** the endpoint now also treats a
+text message `"STOP"` from the client as end-of-recording, in addition to
+`websocket.disconnect`. This was necessary once the endpoint started
+triggering the processing pipeline on completion (see `pipeline.py`):
+closing the socket immediately (the original behavior) meant no progress
+messages could ever be sent back, since the connection was already gone.
+Sending `"STOP"` lets the client signal "done recording" while keeping
+the socket open long enough to receive pipeline progress messages before
+the server closes it. A real client that closes without sending `"STOP"`
+(e.g. a crashed tab) still works via the disconnect path -- it just won't
+receive progress messages, which matches the original acceptance
+criterion about surviving abrupt disconnects.
