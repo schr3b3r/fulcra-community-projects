@@ -58,20 +58,25 @@ clip, tags it with Key and BPM, and pushes it to a data platform as a
   Key/BPM tags, plus the full session waveform with the marker's lookback
   window highlighted as a region). Mirrors v1's UX, rebuilt as native
   Svelte components rather than ported vanilla JS/HTML. `$lib/api.ts`
-  centralizes backend API calls/types; `$lib/WaveformPlayer.svelte` is a
-  reusable wavesurfer wrapper used by both routes.
+  centralizes backend API calls/types (relative URLs, proxied through
+  Vite's dev server -- see `vite.config.ts` -- rather than an absolute
+  `localhost:8000` origin, so only the frontend's port needs to be
+  reachable from the browser); `$lib/WaveformPlayer.svelte` is a reusable
+  wavesurfer wrapper used by both routes.
 - Full backend pipeline (record -> convert -> detect marker -> extract
   idea -> publish to Fulcra, including durable session-audio storage) and
   the full frontend (recording UI + review feed) are built, tested
-  (58/58 pytest, many against the real authenticated Fulcra account), and
+  (59/59 pytest, many against the real authenticated Fulcra account), and
   verified live end-to-end -- both through the actual running WebSocket
   server and via a real headless-Chromium (Playwright) load of both
-  frontend routes against the live dev servers. v1 UX parity achieved.
-  What's NOT done yet: no checked-in browser-level (Playwright) automated
-  test suite for the frontend itself (verified manually/live instead);
-  no realtime marker detection (v1 also deferred this); production
-  frontend deployment shape (static export vs. separate Node process)
-  still an open decision, irrelevant to local dev.
+  frontend routes against the live dev servers, AND against the user's
+  own real recorded session (marker detection was found and fixed to
+  have false positives on quiet recordings; see Decisions Log). v1 UX
+  parity achieved. What's NOT done yet: no checked-in browser-level
+  (Playwright) automated test suite for the frontend itself (verified
+  manually/live instead); no realtime marker detection (v1 also deferred
+  this); production frontend deployment shape (static export vs.
+  separate Node process) still an open decision, irrelevant to local dev.
 
 See `features/INDEX.md` for the full, structured feature spec — what the
 app is supposed to do, broken into individually-scoped features with
@@ -84,7 +89,50 @@ yet started. Consult both, but don't duplicate one into the other.
 (Newest at the top. One entry per meaningful decision — not a full
 chronological journal, just high-signal architectural notes.)
 
-- **(this entry)** Rebuilt the frontend to mirror v1's actual UX (dark
+- **(this entry)** Fixed a real marker-detection bug found via live user
+  testing: playing the marker once produced 4 "detections" in the review
+  feed (one with an invisible highlighted region on the full-session
+  waveform -- 0.18% of the timeline width, not a rendering bug, a real
+  false-positive at t≈0.6s). Root cause: the marker sample's silence-trim
+  used a fixed `top_db` that works for the clean, high-dynamic-range
+  committed test fixtures, but the user's actual recording (quieter mic)
+  had almost its entire duration within `top_db` of its own peak,
+  trimming it down to ~0.58s -- too short/generic a reference clip to
+  correlate against reliably. Fixed with adaptive relaxation in
+  `MFCCCorrelationDetector._trim_marker` (`app/audio/marker_detection.py`):
+  if the initial trim leaves less than `min_marker_duration_seconds`
+  (default 1.0s), progressively relax `top_db` until either a long-enough
+  clip results or a ceiling is hit (falling back to the untrimmed,
+  normalized recording as a last resort). Verified against the user's
+  real session: 4 false positives -> 1, matching what they confirmed
+  (after listening back to their own recording) was their one actual
+  marker play. Cleaned up the incorrect idea records/files from Fulcra
+  and republished the corrected single idea. New regression test
+  (`test_quiet_marker_recording_does_not_trim_to_near_nothing`) uses a
+  synthetic low-dynamic-range signal, since the existing fixtures are too
+  clean to exercise this failure mode at all -- confirmed the fix doesn't
+  change fixture-based results (59/59 passing). Also clarified in
+  `idea_publishing.get_published_ideas()` that it deliberately only
+  understands this codebase's own JSON-note record format, not a prior
+  implementation's different plain-text-note-plus-tags format -- a
+  scope decision (not worth a permanent compatibility parser for a small,
+  fixed number of legacy records), not an oversight.
+- **(previous)** Fixed a real bug reported directly by the user:
+  `/review` failed with "Failed to fetch". Root cause: the frontend
+  called `http://localhost:8000` directly from the browser
+  (`BACKEND_HTTP_ORIGIN`/`BACKEND_WS_ORIGIN` in `$lib/api.ts`), which only
+  works if the browser can reach port 8000 directly -- fails when only
+  the frontend's port is reachable (e.g. via port forwarding into this
+  sandbox). Fixed by adding a Vite dev-server proxy (`vite.config.ts`,
+  forwarding `/api/*` and `/ws/*` to the backend server-side) and
+  switching the frontend to relative URLs plus a `recordingSocketUrl()`
+  helper built from the page's own current origin. Now only the
+  SvelteKit dev server's port needs to be reachable from the browser.
+  Verified: curled `/api/ideas`, `/api/marker`, `/api/audio/session/{id}`
+  through the frontend port alone; opened a real WebSocket through that
+  port and confirmed it proxied through to the pipeline correctly; loaded
+  `/review` with real headless Chromium and confirmed no fetch errors.
+- **(previous)** Rebuilt the frontend to mirror v1's actual UX (dark
   theme, Session/Marker mode toggle, big record button, live log,
   "Current Marker" accordion, Review Ideas feed grouped by session with
   per-idea waveforms + Key/BPM tags and a full-session waveform with the
