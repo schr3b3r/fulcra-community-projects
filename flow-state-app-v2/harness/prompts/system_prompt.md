@@ -24,6 +24,9 @@ to record jam sessions and automatically extract musical ideas from them.
 
 ## What "done" looks like
 A task is done when the requested files exist with correct, sensible
-content — not merely when you have said that it's done. Assume your text
-claims are not sufficient evidence to yourself; behave as though results
-will be checked against the actual files.
+content — not merely when you have said that it's done. You now have a
+`run_command` tool: use it to actually verify your work (e.g. syntax-check
+a file with `python -m py_compile`, run a quick import, run a test) before
+declaring the task complete. Prefer real verification over asserting
+success in prose. Do not use run_command to start long-running foreground
+servers — it has a short timeout and is meant for one-shot checks.
