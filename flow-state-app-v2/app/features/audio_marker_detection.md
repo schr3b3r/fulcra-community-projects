@@ -23,8 +23,10 @@ button, which interrupts the flow of playing.
 - [ ] Detected matches are filtered by a correlation-strength threshold
       (tunable) and a minimum time distance between separate detections
       (so one sustained marker isn't reported as many separate hits).
-- [ ] Validated against a real sample marker + real raw session recording
-      (provided directly, not synthetic) as the primary test fixture.
+- [ ] Validated against the real fixture files in `app/tests/fixtures/`
+      (`marker.webm` + `raw_session.webm`) — confirmed ground truth is
+      exactly 1 marker detection at ~t=38.6s in that session (see
+      `app/tests/fixtures/README.md`).
 - [ ] False-positive rate is reasonable on a quiet/silent test clip with no
       marker present (i.e. it doesn't hallucinate marker hits).
 - [ ] Detection logic is a standalone, testable function/module — not
