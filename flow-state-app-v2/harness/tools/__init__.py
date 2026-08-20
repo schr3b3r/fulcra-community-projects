@@ -10,8 +10,10 @@ Add new tool modules by importing their TOOLS dict and merging it in below.
 
 from harness.tools.filesystem import TOOLS as _FILESYSTEM_TOOLS
 from harness.tools.git_tool import TOOLS as _GIT_TOOLS
+from harness.tools.run_command import TOOLS as _RUN_COMMAND_TOOLS
 
 ALL_TOOLS: dict = {
     **_FILESYSTEM_TOOLS,
     **_GIT_TOOLS,
+    **_RUN_COMMAND_TOOLS,
 }
