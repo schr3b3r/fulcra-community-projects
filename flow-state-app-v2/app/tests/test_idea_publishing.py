@@ -18,6 +18,7 @@ from idea_publishing import (
     PublishingError,
     get_published_ideas,
     publish_musical_idea,
+    upload_session_audio,
 )
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -130,3 +131,21 @@ def test_musical_idea_type_not_found_is_a_distinct_error(
             session_id="whatever",
             marker_timestamp_seconds=10.0,
         )
+
+
+def test_upload_session_audio_round_trip(client, real_idea_clip: Path, session_id: str) -> None:
+    """Upload a real processed-session .wav to Fulcra (independent of any
+    MusicalIdea record) and confirm the upload succeeds and returns a
+    resolvable path -- this is the durable copy the review UI falls back
+    to for 'Full Session Audio' playback when local disk doesn't have it."""
+    upload_path = upload_session_audio(client, real_idea_clip, session_id)
+    assert upload_path == f"/flow-state/sessions/{session_id}.wav"
+
+    resolved = client.resolve_filepath(upload_path)
+    assert len(resolved) == 1
+    assert resolved[0]["name"] == f"{session_id}.wav"
+
+
+def test_upload_session_audio_missing_file_raises(client, tmp_path: Path) -> None:
+    with pytest.raises(PublishingError, match="Session audio file not found"):
+        upload_session_audio(client, tmp_path / "does_not_exist.wav", "whatever")

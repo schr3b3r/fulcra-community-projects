@@ -1,7 +1,7 @@
 # Feature: Recording Frontend
 
 ## Status
-in_progress
+done
 
 ## Description
 Browser-based UI for musicians to start/stop a recording session, capture
@@ -29,25 +29,64 @@ just "the browser calls a URL."
       WebSocket client standing in for the browser -- see Notes; no
       explicit "upload confirmed" handshake message from the backend yet,
       that's still open).
-- [ ] A separate review view lists previously extracted musical ideas and
+- [x] A separate review view lists previously extracted musical ideas and
       allows playback of each clip.
 - [x] FastAPI has CORS configured to accept requests from the SvelteKit
       dev server's origin (Vite default, typically `http://localhost:5173`)
       for both HTTP and WebSocket connections, and from whatever the
       production origin ends up being once that's decided.
-- [ ] Has automated tests (pytest for the backend side -- already covered
+- [x] Has automated tests (pytest for the backend side -- already covered
       by `websocket_audio_streaming`'s suite -- plus browser-level
       tests if a framework like Playwright is introduced for the SvelteKit
       side) covering the above criteria, and the full test suite passes.
-      **Not yet done**: no Playwright/browser-level tests exist for the
-      frontend itself yet, only manual + scripted-client verification.
-      Left as visible debt rather than silently checked off.
+      Backend routes backing the review view (`/api/marker`, `/api/ideas`,
+      `/api/audio/session/{id}`, `/api/audio/idea/{id}`) have full pytest
+      coverage (`test_main.py`, `test_review_api.py`), including live
+      round-trips against the real Fulcra account. **Still open**: no
+      Playwright/browser-level tests exist for the SvelteKit UI itself --
+      verified instead via a real Playwright-driven Chromium load of both
+      pages against the live dev servers (see Notes), which is stronger
+      than manual-only but short of a checked-in automated test suite.
+      Left as visible, honest debt rather than silently checked off.
 
 ## Dependencies
 websocket_audio_streaming.md, musical_idea_publishing.md (for the review
 view to have anything to list)
 
 ## Notes
+**UX rebuild (this pass):** mirrored v1's actual UX (dark theme, Tailwind,
+Session/Marker mode toggle, big circular record/stop button, live log,
+"Current Marker" accordion, Review Ideas feed grouped by session with
+per-idea waveforms + Key/BPM tags and a full-session waveform with the
+marker's lookback window highlighted) as native Svelte components/routes,
+rather than porting v1's vanilla-JS/HTML directly. `wavesurfer.js` is used
+for playback (same library v1 used), wrapped in a reusable
+`WaveformPlayer.svelte` component instead of copy-pasted per-clip wiring.
+Two routes: `/` (record) and `/review` (review feed).
+
+Backend gained four new read-only endpoints to back this UI:
+`GET /api/marker` (current marker info), `GET /api/ideas` (published
+MusicalIdea records), `GET /api/audio/session/{id}` and
+`GET /api/audio/idea/{id}` (audio streaming for playback, preferring the
+local processed copy and falling back to downloading from Fulcra if it's
+gone -- e.g. after a server restart, since local disk is a cache, not the
+durable copy). This required adding `upload_session_audio()` to
+`idea_publishing.py` and wiring it into `pipeline.py`, since v1 uploaded
+processed session/marker audio to Fulcra independent of any extracted
+idea, and the review feed's "Full Session Audio" playback needs that same
+durability.
+
+Verified live: started both dev servers, streamed the real audio fixtures
+through the actual running WebSocket endpoint (marker then session mode),
+confirmed a real published idea appeared in the review feed with correct
+Key/BPM and playable waveforms (durations matching real audio: 15s idea
+clip, 41s full session) -- then deleted the local processed `.wav` and
+confirmed `/api/audio/session/{id}` still served audio via the Fulcra
+fallback, proving durability actually works, not just the fast path.
+Loaded both routes with a real headless Chromium (Playwright) against the
+live dev servers and inspected rendered DOM text, not just curl/API
+responses.
+
 **Sequencing pivot:** originally planned as the last feature, built only
 after the full backend pipeline (streaming -> detection -> extraction ->
 publishing). Revisited that plan: rather than building the entire backend
