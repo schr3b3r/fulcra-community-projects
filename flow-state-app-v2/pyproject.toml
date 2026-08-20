@@ -4,7 +4,8 @@ version = "0.1.0"
 description = "A small, hand-rolled agent harness for building/running/extending the Flow State app. Built for learning harness engineering fundamentals, not as a production tool."
 requires-python = ">=3.11"
 dependencies = [
-    "anthropic>=0.40.0",
+    "google-genai>=0.3.0",
+    "python-dotenv>=1.0.0",
 ]
 
 [build-system]
