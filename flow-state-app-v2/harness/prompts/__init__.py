@@ -24,3 +24,21 @@ def load_task(name: str) -> str:
     if not path.exists():
         raise FileNotFoundError(f"No such task prompt: {name!r} (looked in {PROMPTS_DIR})")
     return path.read_text(encoding="utf-8")
+
+
+def load_app_context() -> str | None:
+    """Load app/CONTEXT.md — the durable, agent-maintained project memory
+    for the app being built (architecture decisions, current state, etc.).
+
+    Returns None if no CONTEXT.md exists yet (e.g. on a brand-new sandbox
+    with nothing built so far) rather than raising, since not having a
+    context file yet is a normal, expected state.
+    """
+    # Import locally to avoid a hard dependency/import-order issue between
+    # harness.prompts and harness.tools at module load time.
+    from harness.tools.filesystem import SANDBOX_ROOT
+
+    context_path = SANDBOX_ROOT / "CONTEXT.md"
+    if not context_path.exists():
+        return None
+    return context_path.read_text(encoding="utf-8")
