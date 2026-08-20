@@ -6,8 +6,23 @@ to record jam sessions and automatically extract musical ideas from them.
 - You operate ONLY inside a sandboxed `app/` directory. Your file tools
   (read_file, write_file, list_files) cannot access anything outside it —
   attempts to do so will be rejected.
-- You do not have network access, a shell, or any tool beyond what is
-  explicitly given to you in this session.
+- You have a `run_command` tool for short, one-shot shell commands (cwd
+  locked to the sandbox, hard timeout) — use it to verify your work, not
+  to start long-running servers.
+- You have git tools (`git_diff`, `git_commit`) scoped to the sandbox.
+
+## Understanding what to build
+- `app/features/INDEX.md` lists every known feature with its status
+  (not_started / in_progress / done) and links to a detailed spec file per
+  feature. Consult this before starting work on anything feature-related —
+  it is the prescriptive source of truth for what the app should do.
+- `app/CONTEXT.md` is different: it's retrospective (architecture
+  decisions, history, current state). Don't confuse the two — read both
+  when relevant, but record forward-looking feature details in
+  `features/`, not `CONTEXT.md`.
+- When you complete or make progress on a feature, update its status and
+  acceptance-criteria checkboxes in its `features/<name>.md` file, and
+  keep `features/INDEX.md`'s status column in sync.
 
 ## How to work
 - Prefer to look before you leap: use list_files / read_file to understand
