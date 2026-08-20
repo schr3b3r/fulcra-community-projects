@@ -10,6 +10,7 @@
 	let status: string = $state('idle');
 	let sessionId: string = $state('');
 	let errorMessage: string = $state('');
+	let progressLog: string[] = $state([]);
 
 	let mediaRecorder: MediaRecorder | null = null;
 	let socket: WebSocket | null = null;
@@ -34,11 +35,22 @@
 		}
 
 		sessionId = newSessionId();
+		progressLog = [];
 		socket = new WebSocket(`${BACKEND_WS_ORIGIN}/ws/record/${sessionId}`);
 		socket.binaryType = 'arraybuffer';
 
 		socket.onerror = () => {
 			errorMessage = 'WebSocket connection error.';
+		};
+
+		socket.onmessage = (event: MessageEvent) => {
+			progressLog = [...progressLog, event.data];
+		};
+
+		socket.onclose = () => {
+			if (status === 'processing') {
+				status = 'done';
+			}
 		};
 
 		socket.onopen = () => {
@@ -64,11 +76,16 @@
 			for (const track of stream.getTracks()) track.stop();
 		}
 		// Give the last ondataavailable chunk a moment to flush over the
-		// socket before closing it.
+		// socket, then tell the backend recording is finished (without
+		// closing the socket ourselves) so it can run the processing
+		// pipeline and stream progress back before it closes the
+		// connection from its side.
 		setTimeout(() => {
-			socket?.close();
+			if (socket && socket.readyState === WebSocket.OPEN) {
+				socket.send('STOP');
+			}
 		}, 250);
-		status = 'stopped';
+		status = 'processing';
 	}
 </script>
 
@@ -80,6 +97,13 @@
 {/if}
 {#if errorMessage}
 	<p style="color: red;">{errorMessage}</p>
+{/if}
+{#if progressLog.length > 0}
+	<ul>
+		{#each progressLog as line}
+			<li>{line}</li>
+		{/each}
+	</ul>
 {/if}
 
 <button onclick={startRecording} disabled={status === 'recording'}>Record</button>

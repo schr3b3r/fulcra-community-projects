@@ -17,10 +17,11 @@ app/.pytest_cache/
 app/**/__pycache__/
 
 # Runtime session data written by the WebSocket audio streaming endpoint
-# (see app/features/websocket_audio_streaming.md) -- not source, shouldn't
-# be committed.
+# (see app/features/websocket_audio_streaming.md) and the processing
+# pipeline (app/pipeline.py) -- not source, shouldn't be committed.
 app/raw/
 app/processed/
+app/ideas/
 
 # SvelteKit frontend (recording_frontend.md) -- standard Node/SvelteKit
 # build artifacts, never committed.

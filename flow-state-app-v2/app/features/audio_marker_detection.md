@@ -1,7 +1,7 @@
 # Feature: Audio Marker Detection
 
 ## Status
-not_started
+done
 
 ## Description
 Detect a specific "audio marker" (e.g. a particular chord or sound) within
@@ -17,44 +17,54 @@ interface ("given session audio + a marker sample, return timestamps"),
 never on the internals of any one detection approach.
 
 ## Acceptance Criteria
-- [ ] Detection logic is exposed behind a stable, swappable interface (e.g.
+- [x] Detection logic is exposed behind a stable, swappable interface (e.g.
       a single function or small class with a clear signature: audio in,
       list of timestamps out) — not spread across the pipeline as
       inline logic. Anything that calls it (the processing pipeline,
       status tracking, etc.) should depend only on that interface, never
       on which algorithm is behind it.
-- [ ] Swapping the detection implementation for a different one later
+- [x] Swapping the detection implementation for a different one later
       should require changing/adding one module, not touching callers.
       Prove this isn't just aspirational: e.g. write two trivial
       interchangeable implementations behind the same interface in tests
       (even a dummy "always returns no matches" one) to confirm callers
       genuinely don't care which is plugged in.
-- [ ] Given a processed `.wav` session file and a processed `.wav` marker
+- [x] Given a processed `.wav` session file and a processed `.wav` marker
       sample, the system can identify the timestamp(s) where the marker
       occurs.
-- [ ] Detection compares audio using MFCC (Mel-frequency cepstral
+- [x] Detection compares audio using MFCC (Mel-frequency cepstral
       coefficient) features rather than raw waveform correlation, since
       raw correlation is far more sensitive to noise/gain differences
       between the marker sample and the live session recording. (This is
       the first implementation behind the interface above — not the only
       one that will ever exist.)
-- [ ] The marker sample is normalized and has leading/trailing silence
+- [x] The marker sample is normalized and has leading/trailing silence
       trimmed before comparison, so silence in the reference clip doesn't
       distort the correlation.
-- [ ] Detected matches are filtered by a correlation-strength threshold
+- [x] Detected matches are filtered by a correlation-strength threshold
       (tunable) and a minimum time distance between separate detections
       (so one sustained marker isn't reported as many separate hits).
-- [ ] Validated against the real fixture files in `app/tests/fixtures/`
+- [x] Validated against the real fixture files in `app/tests/fixtures/`
       (`marker.webm` + `raw_session.webm`) — confirmed ground truth is
       exactly 1 marker detection at ~t=38.6s in that session (see
       `app/tests/fixtures/README.md`).
-- [ ] False-positive rate is reasonable on a quiet/silent test clip with no
+- [x] False-positive rate is reasonable on a quiet/silent test clip with no
       marker present (i.e. it doesn't hallucinate marker hits).
-- [ ] Detection logic is a standalone, testable function/module — not
+- [x] Detection logic is a standalone, testable function/module — not
       wired into the WebSocket streaming path yet (that's a later
       integration step).
-- [ ] Has automated tests (pytest) covering the above criteria, and the
+- [x] Has automated tests (pytest) covering the above criteria, and the
       full test suite passes.
+
+## Notes (continued)
+Implemented in `app/audio/marker_detection.py` as `MFCCCorrelationDetector`
+behind a `MarkerDetector` protocol, with `NullMarkerDetector` as a second,
+trivially different implementation proving the interface boundary is
+real (see `test_swappable_interface_null_detector_returns_no_matches`).
+Validated live against the real fixtures: exactly 1 detection at
+t≈38.59s, matching the documented ground truth. Later wired into
+`pipeline.py` and verified through the actual running WebSocket server,
+not just in isolation.
 
 ## Dependencies
 audio_processing_pipeline.md (operates on the processed `.wav` for both

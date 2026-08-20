@@ -1,7 +1,7 @@
 # Feature: DSP Idea Extraction
 
 ## Status
-not_started
+done
 
 ## Description
 Once a marker's timestamp is known (see `audio_marker_detection.md`),
@@ -11,23 +11,30 @@ and tag it with its musical Key and BPM (tempo). This produces the actual
 "musical idea" artifact to be saved.
 
 ## Acceptance Criteria
-- [ ] Given a processed `.wav` session file and a marker timestamp,
+- [x] Given a processed `.wav` session file and a marker timestamp,
       produces a new audio file containing a 15-second clip: 15 seconds
       *before* the marker timestamp, ending at the marker (a "lookback"
       window, not a centered one) — since the marker is played at the
       moment the musician decides an idea is worth keeping, so the idea
       itself already happened just before that moment.
-- [ ] Estimates BPM for the extracted clip and returns it as a number.
-- [ ] Estimates musical Key for the extracted clip and returns it as a
+- [x] Estimates BPM for the extracted clip and returns it as a number.
+- [x] Estimates musical Key for the extracted clip and returns it as a
       standard key label (e.g. "C major", "A minor").
-- [ ] Handles the edge case where the marker occurs less than 15 seconds
+- [x] Handles the edge case where the marker occurs less than 15 seconds
       into the session: shift/truncate the window sensibly (e.g. start at
       0 and use whatever duration is available) rather than crashing or
       producing a negative-length clip.
-- [ ] Testable standalone (given any audio file + timestamp), independent
+- [x] Testable standalone (given any audio file + timestamp), independent
       of the marker-detection and streaming features.
-- [ ] Has automated tests (pytest) covering the above criteria, and the
+- [x] Has automated tests (pytest) covering the above criteria, and the
       full test suite passes.
+
+## Notes (continued)
+Implemented in `app/audio/dsp_extraction.py`. Validated against the real
+fixtures using the actual marker timestamp (~t=38.6s): produces a real
+15s clip, plus Key/BPM estimates. Later wired into `pipeline.py` and
+verified through the actual running WebSocket server end-to-end,
+producing a real published idea (C# Major, 99 BPM) from the fixture data.
 
 ## Dependencies
 audio_marker_detection.md (for real timestamps in practice, though this

@@ -1,7 +1,7 @@
 # Feature: Processing Status Tracking
 
 ## Status
-not_started
+done
 
 ## Description
 Track the lifecycle of every file that enters the pipeline (raw upload ->
@@ -13,21 +13,32 @@ any point, it should be possible to answer "was this file processed? is it
 currently being processed? did something go wrong, and what?"
 
 ## Acceptance Criteria
-- [ ] A status record is created (via the Fulcra Python SDK, not the CLI)
+- [x] A status record is created (via the Fulcra Python SDK, not the CLI)
       when a raw session file is received, in a "received"/"queued" state.
-- [ ] The status record is updated as the file moves through each pipeline
+- [x] The status record is updated as the file moves through each pipeline
       stage (e.g. "processing", "processed", "marker_detection",
       "extracting", "published", "failed"), with enough detail to know
       which stage it's in at any time.
-- [ ] Failures at any stage are recorded as a distinct "failed" status
+- [x] Failures at any stage are recorded as a distinct "failed" status
       with an error message/reason attached — not silently dropped or left
       stuck in an ambiguous "processing" state forever.
-- [ ] Status for a given session/file can be queried back out (round-trip:
+- [x] Status for a given session/file can be queried back out (round-trip:
       write a status, read it back, confirm it matches) using the SDK's
       annotation query methods.
-- [ ] Standalone and testable: creating/updating/querying status records
+- [x] Standalone and testable: creating/updating/querying status records
       should be exercisable without needing a live WebSocket session or
       real audio files.
+
+## Notes (continued)
+Implemented in `app/status_tracking.py` using MomentAnnotation records
+with a JSON-encoded note payload (session_id/stage/detail/error) plus a
+`stage:<stage>` tag (tag names are capped at 30 chars server-side, which
+ruled out a session-id tag; session filtering is done by decoding the
+note instead). Tests run against the REAL, authenticated Fulcra account
+(skipped if no local credentials), not mocks -- round-tripping actual
+writes and reads. Discovered and worked around Fulcra's ~1s ingest lag
+(annotations aren't immediately queryable after being recorded) by
+polling briefly in tests rather than asserting instantaneously.
 
 ## Dependencies
 none directly, but this is a cross-cutting concern that
