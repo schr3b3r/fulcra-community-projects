@@ -89,20 +89,18 @@ def run(
                 stopped_reason="completed",
             )
 
-        # The model wants to use one or more tools. Execute each, then loop
-        # back around so the model can see the results and continue.
-        # Important: record what the model actually decided to do (not an
-        # empty string) so its own history reflects the tool call it made —
-        # otherwise, on the next round-trip, it sees a "tool result" with no
-        # memory of having asked for it, and tends to just repeat the
-        # original request from scratch.
-        call_descriptions = ", ".join(
-            f"{c['name']}({c.get('args', {})})" for c in response.tool_calls
-        )
+        # The model wants to use one or more tools. Record its turn using
+        # the REAL structured shape (content + tool_calls), matching what
+        # Gemini actually produced — not a narrated text summary. An earlier
+        # version narrated tool calls as plain strings, and the model would
+        # later imitate that literal phrasing as output text instead of
+        # performing real actions, since the history didn't structurally
+        # match anything it had really done.
         messages.append(
             {
                 "role": "assistant",
-                "content": response.text or f"[calling tool(s): {call_descriptions}]",
+                "content": response.text,
+                "tool_calls": response.tool_calls,
             }
         )
         for call in response.tool_calls:
@@ -125,9 +123,7 @@ def run(
             if verbose:
                 print(f"[loop] tool result: {result!r}")
 
-            messages.append(
-                {"role": "user", "content": f"[tool result for {name}]: {result}"}
-            )
+            messages.append({"role": "tool", "name": name, "content": str(result)})
 
     if verbose:
         print(f"[loop] stopped: hit max_iterations ({max_iterations})")

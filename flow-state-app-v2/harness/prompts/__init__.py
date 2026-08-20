@@ -13,3 +13,14 @@ PROMPTS_DIR = Path(__file__).resolve().parent
 def load_system_prompt() -> str:
     """Load the default system prompt for the Flow State build agent."""
     return (PROMPTS_DIR / "system_prompt.md").read_text(encoding="utf-8")
+
+
+def load_task(name: str) -> str:
+    """Load a task/spec prompt by filename (relative to harness/prompts/).
+
+    Example: load_task("task_scaffold_backend.md")
+    """
+    path = PROMPTS_DIR / name
+    if not path.exists():
+        raise FileNotFoundError(f"No such task prompt: {name!r} (looked in {PROMPTS_DIR})")
+    return path.read_text(encoding="utf-8")

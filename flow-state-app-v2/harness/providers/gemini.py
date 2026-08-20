@@ -7,13 +7,25 @@ in the harness — the control loop, tools, prompts — talks to the normalized
 `ModelResponse` / message-dict interface defined here, not to the Gemini SDK
 directly.
 
-Normalized message format (what callers pass in):
-    [{"role": "user", "content": "..."},
-     {"role": "assistant", "content": "..."}, ...]
+Normalized message format (what callers pass in) — three message shapes:
+    {"role": "user", "content": "..."}
+    {"role": "assistant", "content": "..." | None, "tool_calls": [...]}
+    {"role": "tool", "name": "read_file", "content": "..."}
+
+The "assistant" shape's `tool_calls` (optional, list of
+{"name": str, "args": dict}) and the dedicated "tool" role exist because
+Gemini (like most tool-calling APIs) has a REAL structured concept of "the
+model called a function" and "here is that function's result" — these are
+not just text. An earlier version of this harness flattened tool calls and
+results into plain narrated strings inside ordinary text turns. That broke
+down almost immediately: the model would later pattern-match and literally
+imitate that narration as output text instead of performing real actions,
+because the history it was shown didn't structurally match anything it had
+really produced. Preserving the real structure fixes this at the root.
 
 Gemini's SDK uses "user" / "model" instead of "user" / "assistant", and
-expects `Content` objects rather than plain dicts — that translation happens
-entirely inside `call_model`.
+expects `Content` objects (with typed `Part`s) rather than plain dicts —
+that translation happens entirely inside `call_model`.
 
 Tool-calling: callers pass `tools` as our own registry format —
     {"tool_name": (callable, schema_dict), ...}
@@ -22,8 +34,16 @@ Tool-calling: callers pass `tools` as our own registry format —
 This adapter translates that into Gemini's `FunctionDeclaration`/`Tool`
 objects, and translates any function-call parts in the response back into
 our normalized `tool_calls` list:
-    [{"name": "read_file", "args": {"path": "main.py"}}, ...]
+    [{"name": "read_file", "args": {"path": "main.py"}, "thought_signature": ...}, ...]
 The control loop never sees Gemini's native types on either side of the call.
+
+Note on `thought_signature`: Gemini attaches an opaque reasoning-trace
+marker to function_call parts. It MUST be captured from the response and
+replayed verbatim if that same function call is ever sent back as history
+(e.g. in a multi-turn tool-use loop) — omitting it causes a
+400 INVALID_ARGUMENT error on the next call. We carry it through our
+tool_calls dicts for exactly this reason; nothing outside this file needs to
+understand what it means, only pass it along.
 """
 
 from dataclasses import dataclass, field
@@ -40,8 +60,9 @@ DEFAULT_MODEL = "gemini-3.6-flash"
 class ModelResponse:
     """Normalized result of a single call to the model.
 
-    `tool_calls` is a list of {"name": str, "args": dict} — empty if the
-    model didn't ask to call anything this turn.
+    `tool_calls` is a list of {"name": str, "args": dict,
+    "thought_signature": ...} — empty if the model didn't ask to call
+    anything this turn.
     """
     text: str | None
     tool_calls: list = field(default_factory=list)
@@ -59,16 +80,57 @@ def _get_client() -> genai.Client:
 
 
 def _to_gemini_contents(messages: list[dict]) -> list[types.Content]:
-    """Translate our normalized message list into Gemini's Content objects."""
-    role_map = {"user": "user", "assistant": "model"}
+    """Translate our normalized message list into Gemini's Content objects.
+
+    Handles all three normalized shapes (user text, assistant text/tool
+    calls, tool results) by emitting the structurally-correct Gemini Part
+    type for each, rather than collapsing everything to Part(text=...).
+    """
     contents = []
     for msg in messages:
-        role = role_map.get(msg["role"])
-        if role is None:
+        role = msg["role"]
+
+        if role == "user":
+            contents.append(
+                types.Content(role="user", parts=[types.Part(text=msg["content"])])
+            )
+
+        elif role == "assistant":
+            parts = []
+            if msg.get("content"):
+                parts.append(types.Part(text=msg["content"]))
+            for call in msg.get("tool_calls", []):
+                parts.append(
+                    types.Part(
+                        function_call=types.FunctionCall(
+                            name=call["name"], args=call.get("args", {})
+                        ),
+                        # Must be replayed verbatim or Gemini rejects later
+                        # turns in a multi-step tool-use conversation (see
+                        # module docstring).
+                        thought_signature=call.get("thought_signature"),
+                    )
+                )
+            contents.append(types.Content(role="model", parts=parts))
+
+        elif role == "tool":
+            contents.append(
+                types.Content(
+                    role="user",
+                    parts=[
+                        types.Part(
+                            function_response=types.FunctionResponse(
+                                name=msg["name"],
+                                response={"result": msg["content"]},
+                            )
+                        )
+                    ],
+                )
+            )
+
+        else:
             raise ValueError(f"Unsupported message role: {msg['role']!r}")
-        contents.append(
-            types.Content(role=role, parts=[types.Part(text=msg["content"])])
-        )
+
     return contents
 
 
@@ -97,8 +159,8 @@ def call_model(
     """Send a conversation to Gemini and return a normalized response.
 
     Args:
-        messages: normalized message history, e.g.
-            [{"role": "user", "content": "hello"}]
+        messages: normalized message history — see module docstring for the
+            three supported shapes (user / assistant / tool).
         system_prompt: optional system instruction for this call.
         model: which Gemini model to use.
         tools: optional {name: (callable, schema)} registry (see
@@ -129,7 +191,13 @@ def call_model(
         for part in response.candidates[0].content.parts or []:
             fc = getattr(part, "function_call", None)
             if fc is not None:
-                tool_calls.append({"name": fc.name, "args": dict(fc.args or {})})
+                tool_calls.append(
+                    {
+                        "name": fc.name,
+                        "args": dict(fc.args or {}),
+                        "thought_signature": getattr(part, "thought_signature", None),
+                    }
+                )
 
     return ModelResponse(
         text=response.text if not tool_calls else None,
