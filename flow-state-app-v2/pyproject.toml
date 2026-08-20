@@ -1,0 +1,15 @@
+[project]
+name = "flow-state-harness"
+version = "0.1.0"
+description = "A small, hand-rolled agent harness for building/running/extending the Flow State app. Built for learning harness engineering fundamentals, not as a production tool."
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=0.40.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["harness"]

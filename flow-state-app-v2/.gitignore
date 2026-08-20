@@ -1,0 +1,14 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Env / secrets
+.env
+*.key
+
+# Harness runtime state (scratchpads, logs from actual runs)
+harness/state/runs/
+
+# OS
+.DS_Store
