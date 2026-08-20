@@ -26,6 +26,8 @@ and tag it with its musical Key and BPM (tempo). This produces the actual
       producing a negative-length clip.
 - [ ] Testable standalone (given any audio file + timestamp), independent
       of the marker-detection and streaming features.
+- [ ] Has automated tests (pytest) covering the above criteria, and the
+      full test suite passes.
 
 ## Dependencies
 audio_marker_detection.md (for real timestamps in practice, though this

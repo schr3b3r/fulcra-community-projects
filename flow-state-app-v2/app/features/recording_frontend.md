@@ -19,6 +19,9 @@ musical ideas.
       full recording was received.
 - [ ] A separate review view lists previously extracted musical ideas and
       allows playback of each clip.
+- [ ] Has automated tests (pytest, plus browser-level tests if a framework
+      like Playwright is introduced for this feature) covering the above
+      criteria, and the full test suite passes.
 
 ## Dependencies
 websocket_audio_streaming.md, musical_idea_publishing.md (for the review

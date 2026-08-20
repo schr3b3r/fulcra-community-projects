@@ -21,6 +21,8 @@ connection drops mid-session.
       mid-stream and confirm the partial file is still valid).
 - [ ] Basic error handling: a malformed or out-of-order chunk does not
       crash the connection or corrupt previously-written data.
+- [ ] Has automated tests (pytest) covering the above criteria, and the
+      full test suite passes.
 
 ## Dependencies
 backend_skeleton.md

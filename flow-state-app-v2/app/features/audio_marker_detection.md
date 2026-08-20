@@ -30,6 +30,8 @@ button, which interrupts the flow of playing.
 - [ ] Detection logic is a standalone, testable function/module — not
       wired into the WebSocket streaming path yet (that's a later
       integration step).
+- [ ] Has automated tests (pytest) covering the above criteria, and the
+      full test suite passes.
 
 ## Dependencies
 audio_processing_pipeline.md (operates on the processed `.wav` for both

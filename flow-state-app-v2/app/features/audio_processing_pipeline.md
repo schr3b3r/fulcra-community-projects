@@ -26,6 +26,8 @@ the processed `.wav`, not the raw `.webm`.
       and does not leave a partial/corrupt file in `processed/`.
 - [ ] Standalone and testable given any `.webm` input file — does not
       require a live WebSocket session to exercise.
+- [ ] Has automated tests (pytest) covering the above criteria, and the
+      full test suite passes.
 
 ## Dependencies
 websocket_audio_streaming.md (raw `.webm` files are what that feature
