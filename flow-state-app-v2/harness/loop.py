@@ -21,7 +21,7 @@ does not know Gemini exists. If we ever add a second provider, only the
 from dataclasses import dataclass, field
 
 from harness.providers.gemini import call_model
-from harness.prompts import load_system_prompt
+from harness.prompts import load_app_context, load_system_prompt
 from harness.tools import ALL_TOOLS
 
 
@@ -42,6 +42,7 @@ def run(
     system_prompt: str | None = None,
     tools: dict | None = None,
     max_iterations: int = MAX_ITERATIONS,
+    include_app_context: bool = True,
     verbose: bool = True,
 ) -> RunResult:
     """Run the agent loop on a single task until it finishes or stalls out.
@@ -55,6 +56,12 @@ def run(
             dict explicitly ({}) for plain chat mode with no tools at all.
         max_iterations: hard cap on model round-trips, to prevent runaway
             loops.
+        include_app_context: if True (the default), automatically prepends
+            the contents of app/CONTEXT.md (if it exists) to the task, so
+            every task starts with the app's accumulated architectural
+            memory without needing to be repeated by hand in every task
+            prompt. Set False to opt out (e.g. for the smoke tests, which
+            intentionally test in isolation).
         verbose: print progress as it happens.
 
     Returns:
@@ -64,6 +71,19 @@ def run(
         system_prompt = load_system_prompt()
     if tools is None:
         tools = ALL_TOOLS
+
+    if include_app_context:
+        context = load_app_context()
+        if context:
+            task = (
+                "# App context (app/CONTEXT.md — read this first)\n\n"
+                f"{context}\n\n"
+                "# Your task\n\n"
+                f"{task}"
+            )
+            if verbose:
+                print("[loop] prepended app/CONTEXT.md to the task")
+
     messages: list[dict] = [{"role": "user", "content": task}]
 
     for iteration in range(1, max_iterations + 1):

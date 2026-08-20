@@ -31,6 +31,7 @@ def main():
             "Then confirm you did it."
         ),
         tools=FILESYSTEM_TOOLS,
+        include_app_context=False,  # isolated mechanics test, not a real task
     )
 
     print("\n=== RUN RESULT ===")
