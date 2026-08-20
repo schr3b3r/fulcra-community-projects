@@ -4,7 +4,7 @@
 	// log, current-marker accordion). Review feed lives at /review.
 	import { onMount } from 'svelte';
 	import WaveformPlayer from '$lib/WaveformPlayer.svelte';
-	import { BACKEND_WS_ORIGIN, fetchCurrentMarker, newSessionId, sessionAudioUrl } from '$lib/api';
+	import { fetchCurrentMarker, newSessionId, recordingSocketUrl, sessionAudioUrl } from '$lib/api';
 	import type { MarkerInfo } from '$lib/api';
 
 	type Mode = 'session' | 'marker';
@@ -60,7 +60,7 @@
 
 		sessionId = newSessionId();
 		progressLog = [];
-		socket = new WebSocket(`${BACKEND_WS_ORIGIN}/ws/record/${sessionId}?mode=${mode}`);
+		socket = new WebSocket(recordingSocketUrl(sessionId, mode));
 		socket.binaryType = 'arraybuffer';
 
 		socket.onerror = () => {
