@@ -13,7 +13,7 @@ here.
 ## The Product
 A web app for musicians to record long jam sessions. Instead of clicking a
 button to save an idea, they play an "audio marker" (e.g. a specific
-chord). A background DSP worker finds that marker and extracts a 30-second
+chord). A background DSP worker finds that marker and extracts a 15-second
 clip, tags it with Key and BPM, and pushes it to a data platform as a
 "MusicalIdea".
 
