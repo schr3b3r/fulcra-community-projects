@@ -7,7 +7,7 @@ status changes.
 
 | Feature | Status | Description |
 |---|---|---|
-| _(none yet — add a row per feature as you define them; see `_TEMPLATE.md` in this directory)_ | not_started | |
+| [01_resumable_backfill_progress.md](01_resumable_backfill_progress.md) | done | Resumable backfill progress checkpointing stored durably in Fulcra |
 
 ## Status values
 - `not_started` — described but no work done yet.
