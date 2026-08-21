@@ -273,6 +273,19 @@ def test_real_run_produces_expected_files(fake_rapid_prototype_dir: Path, tmp_pa
     assert (output_dir / "harness" / "tools" / "filesystem.py").is_file()
     assert (output_dir / "harness" / "providers" / "gemini.py").is_file()
 
+    # app/fulcra_client.py: copied verbatim (real, working, project-
+    # agnostic code, not a template needing per-project hydration) --
+    # regression coverage for a real failure mode where a fresh agent
+    # with no credential-loading helper burned its entire task iteration
+    # budget rediscovering the correct FulcraCredentials/FulcraAPI wiring
+    # from scratch and never got to write any real feature code.
+    fulcra_client = output_dir / "app" / "fulcra_client.py"
+    assert fulcra_client.is_file()
+    fulcra_client_source = fulcra_client.read_text()
+    assert "{{" not in fulcra_client_source
+    assert "def get_fulcra_client(" in fulcra_client_source
+    assert "FulcraCredentials.from_json" in fulcra_client_source
+
     # Hydrated files exist and contain the project name, not a
     # placeholder token.
     system_prompt = (output_dir / "harness" / "prompts" / "system_prompt.md").read_text()

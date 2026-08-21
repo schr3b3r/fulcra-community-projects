@@ -25,6 +25,12 @@ to this starter kit, not inside it):
     app/
       CONTEXT.md             — hydrated from templates/app/CONTEXT.md.template
       ENGINEERING_STANDARDS.md — hydrated from templates/app/ENGINEERING_STANDARDS.md.template
+      fulcra_client.py       — copied verbatim (real, working credential-
+                                loading helper, not a template -- see the
+                                file's own docstring for why this exists
+                                as a starter-kit file rather than
+                                something each project's agent writes
+                                itself from scratch)
       features/
         INDEX.md             — hydrated from templates/app/features/INDEX.md.template
         _TEMPLATE.md          — copied verbatim (per-feature file skeleton)
@@ -610,6 +616,16 @@ def main() -> int:
     write_file(
         args.output_dir / "app" / "features" / "_TEMPLATE.md",
         feature_template_skeleton,  # verbatim, no hydration needed
+        args.dry_run,
+    )
+
+    fulcra_client_source = (TEMPLATES_DIR / "app" / "fulcra_client.py").read_text()
+    write_file(
+        args.output_dir / "app" / "fulcra_client.py",
+        fulcra_client_source,  # verbatim, no hydration needed -- this is
+        # real, working, project-agnostic code (the exact credential-
+        # loading pattern already proven in flow-state-app-v2), not a
+        # template that needs per-project values filled in.
         args.dry_run,
     )
 
