@@ -29,16 +29,11 @@ a markdown file.
 (See `architecture.md` at the repo root for the full architecture writeup this summary was excerpted from.)
 
 ## Current State
-Not yet written: `GitHubBackfillProgress` (Milestone 1's checkpoint type)
-does not exist yet. Two consecutive harness task runs against this
-milestone burned their entire iteration budget on Fulcra SDK exploration
-(auth wiring, then `record_data_type`'s exact call signature) without
-writing any checkpoint code. See "Fulcra SDK usage notes (verified)"
-below for what those two runs discovered, captured here specifically so
-a third run doesn't have to rediscover it — read that section before
-writing any Fulcra integration code in this project.
-
-See `plan.md` (at the repo root) for the intended build sequence.
+Milestone 1 (resumable backfill checkpoint) is DONE — see
+`checkpoint.py` and `app/features/01_resumable_backfill_progress.md`.
+Milestone 2 (real GitHub ingestion) is the next task
+(`harness/prompts/task_002_milestone-2-github-ingestion-real-api-calls.md`).
+See `plan.md` (at the repo root) for the full intended build sequence.
 
 ## Fulcra SDK usage notes (verified against the real API, not assumed)
 These are exact, tested call shapes for the `fulcra-api` SDK calls this
@@ -103,6 +98,41 @@ yet started. Consult both, but don't duplicate one into the other.
 (Newest at the top. One entry per meaningful decision — not a full
 chronological journal, just high-signal architectural notes.)
 
+- **(Milestone 1 complete)** `GitHubBackfillProgress` checkpoint type +
+  `write_checkpoint`/`read_checkpoint`/`list_checkpoints`/`clear_checkpoint`/
+  `process_with_checkpoint` built in `checkpoint.py`, tested against fake
+  work items (not real GitHub data — deliberately, per the Plan's
+  sequencing philosophy). Real resumability verified: process items
+  1-100, interrupt at item 47, restart from a fresh call, confirm it
+  resumes at item 48 with zero duplicates or gaps. Took 3 harness task
+  runs to land (see "Fulcra SDK usage notes" above, added after the
+  first 2 runs burned their entire iteration budget on SDK exploration
+  rather than writing code) plus one follow-up fix:
+  `list_checkpoints` initially had a real intermittent test failure —
+  querying Fulcra immediately after two back-to-back writes, with no
+  poll/retry, occasionally missed a just-written record (Fulcra writes
+  are eventually consistent). Fixed by adding an `expected_task_ids` +
+  `timeout_seconds` polling option, used by the test, rather than a
+  blind `sleep()`.
+- **(harness bug found and fixed)** The `git_commit` tool's test gate
+  was invoking bare `pytest`, which does NOT add the current directory
+  to `sys.path` the way `python -m pytest` does. Since `app/tests/` has
+  no `__init__.py` (normal, not a bug), this meant any test doing a
+  plain top-level `import fulcra_client` (exactly the pattern this
+  project's own `ENGINEERING_STANDARDS.md` recommends) failed to import
+  under the gate specifically, while passing fine when run directly.
+  This blocked committing Milestone 1's genuinely-passing work. Fixed in
+  `harness/tools/git_tool.py` (now invokes `python -m pytest`) and
+  upstream in `fulcra-agent-harness-starter`'s `engine/tools/git_tool.py`
+  so future scaffolds don't hit this (see that repo's PR #17).
+- **(process note, not architecture)** Multiple exploratory/ad-hoc
+  Fulcra writes during manual debugging (outside any test's own
+  try/finally cleanup) left real stray records in Fulcra across the
+  Milestone 1 work — 146 total across several cleanup passes. Going
+  forward: prefer writing throwaway exploration through a mechanism that
+  cleans up after itself (a test with try/finally, or an explicit
+  cleanup call immediately after), rather than leaving ad-hoc
+  `record_data_type` calls unresolved during manual API exploration.
 - **(initial)** Scaffolded from the fulcra-agent-harness-starter kit.
   Architecture, Interview, and Plan artifacts from the
   fulcra-rapid-prototype skill's Intake/Interview/Architecture/Plan phases
