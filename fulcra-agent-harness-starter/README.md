@@ -39,9 +39,15 @@ python scripts/scaffold.py \
   --rapid-prototype-dir /path/to/rapid-prototype-output \
   --output-dir /path/to/new-project
 
-# 3. Set up and verify the new project:
+# 3. Set up and verify the new project. If you saw "Preserving
+#    fulcra-rapid-prototype git history" above, a repo with the real
+#    Intake/Interview/Architecture/Plan commits already exists --
+#    just commit the new files on top:
 cd /path/to/new-project
-git init && git add -A && git commit -m "Initial scaffold"
+git log --oneline   # confirm the real phase history came through
+git add -A && git commit -m "Scaffold harness + app"
+# Otherwise (no source git repo was found), initialize fresh instead:
+#   git init && git add -A && git commit -m "Initial scaffold"
 python -m venv .venv && .venv/bin/pip install -e .
 cp .env.example .env   # fill in GEMINI_API_KEY
 .venv/bin/python -m harness.test_loop_smoke   # confirm it actually works
@@ -117,6 +123,32 @@ harness works*. These use plain `{{PLACEHOLDER}}` string substitution
 expected to be hand-edited further after scaffolding — the generated
 versions are a real starting point, not a finished product.
 
+## Git history preservation
+
+`fulcra-rapid-prototype` commits after every phase (Intake, Interview,
+Architecture, Plan) — it uses that git history plus a `git bundle`
+backup specifically so a project can be resumed cleanly across fresh
+agent sessions with no shared filesystem. Throwing that history away the
+moment a project graduates from prototyping into its own real repo would
+undo exactly the continuity that mechanism exists for.
+
+So by default (`--history=auto`), `scripts/scaffold.py` **preserves**
+that history: if `--rapid-prototype-dir` is a real git working tree, the
+new project is created with `git clone` (bringing every phase commit
+along as real history), and the harness/app scaffolding is added on top
+as new, uncommitted files for you to commit yourself. If the source
+isn't a git repo, it falls back to the old behavior: a fresh repo you
+initialize yourself, with the artifact files copied in as plain content
+under a single "Initial scaffold" commit.
+
+Force either behavior explicitly with `--history=preserve` (errors out
+clearly, rather than silently falling back, if the source isn't a real
+git repo) or `--history=copy` (always flattens, even if the source repo
+could have been preserved). See `scripts/scaffold.py --help` for the
+full flag description, including the constraint that history-preserving
+mode needs `--output-dir` to not exist yet at all (a `git clone`
+requirement, not something this script imposes).
+
 ## Known caveats
 
 - `harness/tools/test_git_commit_gate_smoke.py` (in a scaffolded project)
@@ -132,15 +164,24 @@ versions are a real starting point, not a finished product.
   parser of `plan.md`'s structure. It's meant to save you from writing the
   first task prompt entirely from scratch, not to guarantee it picked the
   ideal starting point — review the generated `task_001_*.md` by hand.
+- History-preserving mode writes `harness/`, `app/`, `README.md`,
+  `pyproject.toml`, `.gitignore`, and `.env.example` directly into the
+  cloned repo, overwriting any same-named files that happen to already
+  exist there without asking. Not an issue for a typical
+  fulcra-rapid-prototype repo (its own files never collide with these
+  names), but review `git status`/`git diff` before committing if your
+  source repo had its own root-level files with these names.
 
 ## Status
 
 Extracted and generalized from a real, previously-built harness (proven
 working across multiple real features in that project). The scaffold
-script itself has a real pytest suite (`scripts/tests/test_scaffold.py`)
-and has been manually verified end-to-end: scaffold a fake project,
-install it, run all six harness smoke tests against a real Gemini API
-key, confirm all pass.
+script itself has a real pytest suite (`scripts/tests/test_scaffold.py`,
+including coverage of both history-preserving and history-flattening
+paths against real git repos) and has been manually verified end-to-end:
+scaffold a fake project (with and without a real rapid-prototype git
+history to preserve), install it, run all six harness smoke tests against
+a real Gemini API key, confirm all pass.
 
 Not yet done: no automated CI for this repo itself; the
 `--domain-library-guidance` CLI flag is a manual convenience, not derived

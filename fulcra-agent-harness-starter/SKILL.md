@@ -107,13 +107,47 @@ placeholder for the user to fill in by hand — that's an acceptable
 outcome, not a failure, since not every project has an obvious domain
 library set worth calling out this early.
 
+**Git history:** by default (`--history=auto`) this script PRESERVES
+fulcra-rapid-prototype's real phase-by-phase commit history — if
+`--rapid-prototype-dir` is a git working tree (the normal case, since
+that skill commits after every phase), the new project is created by
+cloning it, so a future session can `git log` the new project and see
+the actual Intake/Interview/Architecture/Plan commits, not just their
+content flattened into one commit. This matters for the same reason
+fulcra-rapid-prototype uses `git bundle` for cross-session continuity in
+the first place — don't throw that continuity away at the exact moment
+the project graduates to its own repo.
+
+If the user has a `.bundle` backup instead of a live checkout, unpack it
+first (`git clone <bundle> <dir>`, per fulcra-rapid-prototype's own
+"Resuming a Project" instructions) and point `--rapid-prototype-dir` at
+the unpacked directory. If `--rapid-prototype-dir` isn't a git repo at
+all, this script automatically falls back to flattening (equivalent to
+`--history=copy`) — that's a normal, silent fallback for `auto`, not an
+error. Only pass `--history=preserve` explicitly if you want a hard
+failure instead of a silent fallback (e.g. to catch a mistake in which
+directory you pointed at).
+
+Note: history-preserving mode clones directly into `--output-dir`, which
+means that path must not exist yet at all (not even as an empty
+directory) — this is a real constraint of `git clone`, not a limitation
+of this script. If you hit this, either delete/rename the target first
+or pick a fresh path.
+
 ### 5. Verify the scaffold actually works before handing off
 Do NOT just report "scaffolding complete" once the script exits — that is
 exactly the kind of unverified claim this project's own engineering
 standards exist to prevent. Actually run:
 ```bash
 cd <new project dir>
-git init && git add -A && git commit -m "Initial scaffold"
+git log --oneline   # if history was preserved, confirm the real
+                     # Intake/Interview/Architecture/Plan commits are
+                     # there, not just one flattened commit
+git add -A && git commit -m "Scaffold harness + app"   # or "git init &&
+                     # git add -A && git commit -m 'Initial scaffold'"
+                     # if history was NOT preserved (no repo exists yet
+                     # in that case) -- the script's own final output
+                     # tells you which applies
 python -m venv .venv && .venv/bin/pip install -e .
 cp .env.example .env   # fill in GEMINI_API_KEY
 .venv/bin/python -m harness.test_loop_smoke

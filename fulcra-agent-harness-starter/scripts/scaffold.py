@@ -33,6 +33,32 @@ to this starter kit, not inside it):
     .gitignore                — copied verbatim from templates/.gitignore.template
     .env.example              — copied verbatim from templates/.env.example.template
 
+GIT HISTORY: fulcra-rapid-prototype tracks each phase (Intake, Interview,
+Architecture, Plan) as a real commit in its own repo. By default
+(--history=auto) this script PRESERVES that history: if
+--rapid-prototype-dir is itself a git working tree, the new project is
+created by cloning it (so every phase commit becomes real history in the
+new repo), then harness/ and app/ are added on top as one new commit.
+If --rapid-prototype-dir is NOT a git repo (e.g. plain files, or a
+not-yet-unpacked .bundle -- unpack it first with
+`git clone <bundle> <dir>`, per fulcra-rapid-prototype's own "Resuming a
+Project" instructions), this script falls back to --history=copy: a
+fresh repo is initialized and the artifact files are copied in as plain
+content in a single "Initial scaffold" commit, with no phase-by-phase
+history. Force either behavior explicitly with --history=preserve or
+--history=copy; preserve will error out clearly if the source isn't a
+real git working tree rather than silently falling back.
+
+CAVEAT when --history=preserve/auto-preserving: this script writes
+harness/, app/, README.md, pyproject.toml, .gitignore, and .env.example
+directly into the cloned repo, OVERWRITING any same-named files that
+happen to already exist there without asking. This is a non-issue for a
+typical fulcra-rapid-prototype repo (it produces intake/, interview/,
+architecture.md, plan.md — none of which collide with what this script
+writes), but if your rapid-prototype repo happens to already have its own
+README.md, .gitignore, etc. at the root, review `git diff` after
+scaffolding before committing, since those would be silently replaced.
+
 Usage:
     python scripts/scaffold.py \\
         --project-name "Acme Widget Tracker" \\
@@ -56,6 +82,7 @@ templating engine.
 import argparse
 import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -68,6 +95,71 @@ class ScaffoldError(Exception):
     """Raised when scaffolding cannot proceed (missing prerequisite
     artifact, invalid arguments, etc.) — always with a message explaining
     exactly what's missing and what to do about it."""
+
+
+def is_git_working_tree(path: Path) -> bool:
+    """Whether `path` is (the root of) a real, checked-out git working
+    tree — used to decide whether history-preserving scaffolding
+    (--history=preserve/auto) is possible.
+
+    Deliberately does NOT understand raw .bundle files directly (per
+    fulcra-rapid-prototype's own "Resuming a Project" instructions, a
+    downloaded bundle is meant to be unpacked with
+    `git clone <bundle> <dir>` before being resumed from) — keeping this
+    script's git handling to "clone a working tree" only, rather than
+    also parsing bundle files itself, keeps this one script simple and
+    inspectable rather than duplicating fulcra-rapid-prototype's own
+    resume mechanism.
+    """
+    if not path.is_dir():
+        return False
+    result = subprocess.run(
+        ["git", "-C", str(path), "rev-parse", "--is-inside-work-tree"],
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0 and result.stdout.strip() == "true"
+
+
+def clone_with_history(source: Path, dest: Path, dry_run: bool) -> None:
+    """Clone `source`'s full git history into `dest`, so every
+    fulcra-rapid-prototype phase commit (Intake, Interview, Architecture,
+    Plan) becomes real, inspectable git history in the new project —
+    rather than flattening that work into a single "Initial scaffold"
+    commit with the artifact files copied in as plain content (which is
+    what --history=copy does instead).
+
+    Raises:
+        ScaffoldError: if the clone itself fails (e.g. `source` turned
+            out not to be a valid git repo after all).
+    """
+    print(
+        f"  {'[dry-run] would' if dry_run else ''} git clone (preserving "
+        f"full rapid-prototype history): {source} -> {dest}"
+    )
+    if dry_run:
+        return
+
+    result = subprocess.run(
+        ["git", "clone", str(source), str(dest)],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise ScaffoldError(f"git clone failed: {result.stderr.strip()}")
+
+    # The cloned repo's "origin" remote points at the rapid-prototype
+    # directory's local filesystem path -- meaningless anywhere else, and
+    # likely to stop existing once that scratch directory is cleaned up.
+    # Remove it so nothing later accidentally tries to push/pull from it;
+    # the user adds their own real remote (e.g. a fresh GitHub repo) once
+    # they're ready to publish this project.
+    subprocess.run(
+        ["git", "remote", "remove", "origin"],
+        cwd=dest,
+        capture_output=True,
+        text=True,
+    )
 
 
 def read_required_artifact(path: Path, phase_name: str) -> str:
@@ -234,9 +326,61 @@ def main() -> int:
         "--dry-run", action="store_true",
         help="Print what would be written without touching disk.",
     )
+    parser.add_argument(
+        "--history", choices=["auto", "preserve", "copy"], default="auto",
+        help=(
+            "How to handle fulcra-rapid-prototype's git history. "
+            "'auto' (default): preserve it if --rapid-prototype-dir is a "
+            "git working tree, otherwise fall back to 'copy'. 'preserve': "
+            "require history preservation, erroring out if "
+            "--rapid-prototype-dir isn't a real git repo (e.g. an "
+            "unpacked .bundle). 'copy': always flatten to a single "
+            "'Initial scaffold' commit with artifact files copied in as "
+            "plain content, even if history preservation would be "
+            "possible."
+        ),
+    )
     args = parser.parse_args()
 
-    if args.output_dir.exists() and any(args.output_dir.iterdir()):
+    # Resolve --history=auto to a concrete mode up front, so the rest of
+    # this function only ever has to handle the two real cases.
+    rapid_prototype_is_git_repo = is_git_working_tree(args.rapid_prototype_dir)
+    if args.history == "preserve" and not rapid_prototype_is_git_repo:
+        print(
+            f"ERROR: --history=preserve was requested, but "
+            f"{args.rapid_prototype_dir} is not a git working tree "
+            f"(no history to preserve). If you have a fulcra-rapid-"
+            f"prototype .bundle backup instead of a live checkout, unpack "
+            f"it first with `git clone <bundle> <dir>` (see that skill's "
+            f"own 'Resuming a Project' instructions), then point "
+            f"--rapid-prototype-dir at the unpacked directory. Otherwise, "
+            f"use --history=copy (or --history=auto) to proceed without "
+            f"phase-by-phase history.",
+            file=sys.stderr,
+        )
+        return 1
+    preserve_history = args.history == "preserve" or (
+        args.history == "auto" and rapid_prototype_is_git_repo
+    )
+
+    if preserve_history:
+        # git clone itself refuses to clone into an existing non-empty
+        # directory (and will even refuse an existing EMPTY directory in
+        # some git versions) -- so for this mode --output-dir must not
+        # exist at all yet, not just be empty. Check explicitly for a
+        # clearer error than whatever git's own message would say.
+        if args.output_dir.exists():
+            print(
+                f"ERROR: --output-dir {args.output_dir} already exists. "
+                f"History-preserving scaffolding (--history=preserve/auto) "
+                f"clones into --output-dir, which requires the path to not "
+                f"exist yet at all (not even as an empty directory). "
+                f"Choose a new path, or pass --history=copy if you want to "
+                f"scaffold into an existing empty directory instead.",
+                file=sys.stderr,
+            )
+            return 1
+    elif args.output_dir.exists() and any(args.output_dir.iterdir()):
         print(
             f"ERROR: --output-dir {args.output_dir} already exists and is "
             f"non-empty. Refusing to scaffold into it (this script never "
@@ -307,6 +451,15 @@ def main() -> int:
     }
 
     print(f"Scaffolding {project_name!r} into {args.output_dir}\n")
+
+    if preserve_history:
+        print("Preserving fulcra-rapid-prototype git history...")
+        try:
+            clone_with_history(args.rapid_prototype_dir, args.output_dir, args.dry_run)
+        except ScaffoldError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+        print()
 
     # 1. harness/ <- engine/ (verbatim copy, no hydration needed)
     print("Copying project-agnostic harness engine...")
@@ -390,42 +543,60 @@ def main() -> int:
     write_file(args.output_dir / ".env.example", env_example_content, args.dry_run)
 
     # 6. Copy the rapid-prototype artifacts themselves into the new repo
-    # root, so the new project's git history includes the reasoning that
+    # root, so the new project's history includes the reasoning that
     # produced it (per fulcra-for-agents.md's "Durable Handoff" pattern —
     # a future agent/session should be able to see how this project's
-    # architecture was decided, not just the result).
-    print("\nCopying fulcra-rapid-prototype artifacts into the new repo...")
-    for artifact_name in ("intake", "interview", "architecture.md", "plan.md"):
-        src = args.rapid_prototype_dir / artifact_name
-        if not src.exists():
-            continue
-        dst = args.output_dir / artifact_name
-        if src.is_dir():
-            for f in sorted(src.rglob("*")):
-                if f.is_file():
-                    rel = f.relative_to(args.rapid_prototype_dir)
-                    write_file(args.output_dir / rel, f.read_text(), args.dry_run)
-        else:
-            write_file(dst, src.read_text(), args.dry_run)
+    # architecture was decided, not just the result). Skipped when
+    # preserve_history is True: clone_with_history() already brought
+    # these files in (along with every phase's individual commit, which
+    # plain copying can never reproduce).
+    if not preserve_history:
+        print("\nCopying fulcra-rapid-prototype artifacts into the new repo...")
+        for artifact_name in ("intake", "interview", "architecture.md", "plan.md"):
+            src = args.rapid_prototype_dir / artifact_name
+            if not src.exists():
+                continue
+            dst = args.output_dir / artifact_name
+            if src.is_dir():
+                for f in sorted(src.rglob("*")):
+                    if f.is_file():
+                        rel = f.relative_to(args.rapid_prototype_dir)
+                        write_file(args.output_dir / rel, f.read_text(), args.dry_run)
+            else:
+                write_file(dst, src.read_text(), args.dry_run)
 
     print(
         f"\n{'[dry-run] Nothing was written.' if args.dry_run else 'Done.'}\n"
     )
     if not args.dry_run:
         print("Next steps:")
-        print(f"  1. cd {args.output_dir}")
-        print("  2. git init && git add -A && git commit -m 'Initial scaffold'")
-        print("  3. python -m venv .venv && .venv/bin/pip install -e .")
-        print("  4. cp .env.example .env  # fill in GEMINI_API_KEY")
-        print("  5. .venv/bin/python -m harness.test_loop_smoke  # confirm the harness works")
+        step = 1
+        print(f"  {step}. cd {args.output_dir}")
+        step += 1
+        if preserve_history:
+            print(
+                f"  {step}. git log --oneline  # confirm your "
+                f"fulcra-rapid-prototype phase history came through, then "
+                f"git add -A && git commit -m 'Scaffold harness + app'"
+            )
+        else:
+            print(f"  {step}. git init && git add -A && git commit -m 'Initial scaffold'")
+        step += 1
+        print(f"  {step}. python -m venv .venv && .venv/bin/pip install -e .")
+        step += 1
+        print(f"  {step}. cp .env.example .env  # fill in GEMINI_API_KEY")
+        step += 1
+        print(f"  {step}. .venv/bin/python -m harness.test_loop_smoke  # confirm the harness works")
+        step += 1
         print(
-            f"  6. Review harness/prompts/system_prompt.md and "
+            f"  {step}. Review harness/prompts/system_prompt.md and "
             f"harness/prompts/task_001_{task_slug}.md by hand -- the "
             f"heuristics that generated them are a starting point, not a "
             f"substitute for your own judgment about what the project "
             f"actually needs first."
         )
-        print("  7. .venv/bin/python -m harness.run_task task_001_" + task_slug + ".md")
+        step += 1
+        print(f"  {step}. .venv/bin/python -m harness.run_task task_001_" + task_slug + ".md")
 
     return 0
 
