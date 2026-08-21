@@ -35,7 +35,7 @@ to this starter kit, not inside it):
 
 Usage:
     python scripts/scaffold.py \\
-        --project-name "Flow State" \\
+        --project-name "Acme Widget Tracker" \\
         --rapid-prototype-dir /path/to/rapid-prototype-artifacts \\
         --output-dir /path/to/new-project-repo
 
@@ -138,8 +138,9 @@ def extract_first_plan_milestone(plan_md: str) -> tuple[str, str]:
 
 def slugify(text: str) -> str:
     """Turn a project name into a filesystem/package-safe slug, e.g.
-    'Flow State' -> 'flow-state'. Deliberately simple (no unicode
-    normalization) since project names are expected to be plain ASCII."""
+    'Acme Widget Tracker' -> 'acme-widget-tracker'. Deliberately simple
+    (no unicode normalization) since project names are expected to be
+    plain ASCII."""
     slug = re.sub(r"[^a-zA-Z0-9]+", "-", text.strip().lower()).strip("-")
     if not slug:
         raise ScaffoldError(f"Could not derive a usable slug from {text!r}")
@@ -201,7 +202,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--project-name", required=True,
-        help="Human-readable project name, e.g. 'Flow State'.",
+        help="Human-readable project name, e.g. 'Acme Widget Tracker'.",
     )
     parser.add_argument(
         "--rapid-prototype-dir", required=True, type=Path,

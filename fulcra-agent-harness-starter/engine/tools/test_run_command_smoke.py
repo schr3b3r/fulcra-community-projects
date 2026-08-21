@@ -26,10 +26,10 @@ def main():
     print(output)
     assert "python OK" in output, (
         "Expected python to resolve correctly (see _HARNESS_VENV_BIN in "
-        "run_command.py). If your project has installed real dependencies "
-        "in .venv, prefer asserting one of those imports instead — see "
-        "flow-state-app-v2's version of this test for an example "
-        "(`import fastapi`)."
+        "run_command.py). Once your project has installed real "
+        "dependencies into .venv, consider replacing this with an assert "
+        "on one of those imports instead (e.g. `import <your main "
+        "framework>`) for a stronger, project-specific signal."
     )
 
     print("\n--- Test 4: nonzero exit code is captured, not raised ---")

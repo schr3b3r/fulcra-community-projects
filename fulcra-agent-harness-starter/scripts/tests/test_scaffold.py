@@ -59,7 +59,7 @@ def fake_rapid_prototype_dir(tmp_path: Path) -> Path:
 
 
 def test_slugify_basic():
-    assert scaffold.slugify("Flow State") == "flow-state"
+    assert scaffold.slugify("Acme Widget Tracker") == "acme-widget-tracker"
     assert scaffold.slugify("  Calendar   Digest!! ") == "calendar-digest"
 
 
@@ -70,8 +70,8 @@ def test_slugify_rejects_empty_result():
 
 def test_hydrate_replaces_all_placeholders():
     template = "Hello {{NAME}}, welcome to {{PROJECT}}."
-    result = scaffold.hydrate(template, {"NAME": "Ada", "PROJECT": "Flow State"})
-    assert result == "Hello Ada, welcome to Flow State."
+    result = scaffold.hydrate(template, {"NAME": "Ada", "PROJECT": "Acme Widget Tracker"})
+    assert result == "Hello Ada, welcome to Acme Widget Tracker."
 
 
 def test_hydrate_raises_on_missing_value():

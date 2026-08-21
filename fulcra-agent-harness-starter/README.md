@@ -14,10 +14,10 @@ the generated `app/ENGINEERING_STANDARDS.md` encodes those patterns
 (Context–Compute Separation, Derived Context, Resumable Discovery) as
 concrete, checkable rules rather than abstract advice.
 
-It was extracted from real, working code: the harness engine here
-(`engine/`) is the actual agent harness built and battle-tested in
-[`flow-state-app-v2`](../flow-state-app-v2/), generalized to remove that
-project's specific content once it was proven to work.
+It was extracted from a real, working agent harness (built and battle-
+tested across multiple real features on an earlier project), generalized
+here to remove that project's specific content — the engine underneath
+this starter kit is proven, not speculative.
 
 ## Quick start
 
@@ -135,12 +135,12 @@ versions are a real starting point, not a finished product.
 
 ## Status
 
-Extracted and generalized from `flow-state-app-v2`'s harness (proven
-working across multiple real features built with it). The scaffold script
-itself has a real pytest suite (`scripts/tests/test_scaffold.py`) and has
-been manually verified end-to-end: scaffold a fake project, install it,
-run all six harness smoke tests against a real Gemini API key, confirm
-all pass.
+Extracted and generalized from a real, previously-built harness (proven
+working across multiple real features in that project). The scaffold
+script itself has a real pytest suite (`scripts/tests/test_scaffold.py`)
+and has been manually verified end-to-end: scaffold a fake project,
+install it, run all six harness smoke tests against a real Gemini API
+key, confirm all pass.
 
 Not yet done: no automated CI for this repo itself; the
 `--domain-library-guidance` CLI flag is a manual convenience, not derived
