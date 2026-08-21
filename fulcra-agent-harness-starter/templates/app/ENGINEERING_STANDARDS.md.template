@@ -1,0 +1,79 @@
+# Engineering Standards
+
+These are hard requirements for all code in this app, not suggestions.
+They exist to solve a specific, observed problem: an agent building
+software autonomously will, left unchecked, regress previously-working
+functionality while adding new features, with no reliable way to catch it,
+and will drift toward mock data and ad-hoc file-based state instead of
+using the durable, owner-controlled context Fulcra actually provides.
+These standards are the fix — they turn "please be careful" into "the
+process itself catches you if you're not."
+
+## Testing (the big one)
+- Every feature ships with automated tests (pytest) covering its
+  acceptance criteria — see each feature's file in `app/features/`.
+- **Before declaring any task complete, run the FULL test suite** (e.g.
+  `pytest` from the sandbox root), not just tests related to the current
+  change. A task that adds a new feature but breaks an old one is not
+  done — it's a regression, and the whole point of this standard is to
+  catch that automatically instead of hoping nobody notices.
+- Tests live under `app/tests/`, mirroring the structure of the code they
+  test.
+- Prefer real, runnable tests (actually import and exercise the code)
+  over tests that only check that a file exists or contains certain text.
+- Prefer testing against real Fulcra data over mocks where practical (see
+  "Prefer real Fulcra data in tests" below) — this project's harness has
+  real Fulcra credentials available specifically so this is possible.
+
+## Type hints
+Use type hints throughout — function signatures, return types, and
+non-trivial variables. This is not optional style preference; it makes
+mistakes easier to catch and keeps the codebase honest about what it
+expects.
+
+## Prefer established libraries over hand-rolled logic
+Don't reinvent things a well-established library already does well.
+{{DOMAIN_LIBRARY_GUIDANCE}}
+- Fulcra integration: the `fulcra-api` Python SDK (`pip install
+  fulcra-api`) — NOT the `fulcra-api` CLI, and NOT raw subprocess/shell
+  calls to any Fulcra tooling. The SDK gives real Python objects, proper
+  exceptions, and testability that shelling out does not.
+
+## Fulcra-specific patterns
+These map directly onto the architectural patterns described in
+[fulcra-for-agents.md](https://github.com/kubla/fulcra-for-agents/blob/main/fulcra-for-agents.md) —
+read that document once, up front, if you haven't; it explains *why*
+these rules exist, not just what they are.
+
+- **Context–Compute Separation:** owner-scoped context that should outlive
+  this agent process, this conversation, or this application version
+  belongs in Fulcra — not in local files, not in this process's memory.
+  Local disk/in-memory state is a fast-path cache at best, never the
+  durable copy of anything that matters. When in doubt about whether
+  something should be written to Fulcra, prefer durability.
+- **Derived Context:** when this app computes a conclusion from raw data
+  (a summary, classification, extracted value, decision, etc.), record it
+  with its producer/provenance and a reference to the observations it was
+  derived from — not just the bare conclusion. A later agent or task
+  should be able to tell "this value was computed by X from Y," not just
+  see the value.
+- **Use annotation/event/metric data types** (`MomentAnnotation`,
+  `NumericAnnotation`, custom types via `create_annotation`/
+  `record_data_type`) to make application state queryable, rather than
+  relying on directory scanning or implicit file state to answer "what
+  has happened / what is the current state."
+- **Resumable Discovery:** if this app has any kind of polling/background
+  loop that should pick up "what changed since last time," maintain an
+  explicit durable progress marker (in Fulcra, not a local file) rather
+  than re-scanning everything each run or losing track across restarts.
+- Validate records against their schema (`validate_records`) before
+  submitting them where practical, so malformed data is caught with a
+  clear error rather than an opaque API rejection.
+
+## Regression prevention (enforced, not just requested)
+The `git_commit` tool itself runs the test suite before allowing a commit
+to succeed, and refuses to commit if any test fails. This means the rule
+above ("run tests before declaring done") is not just an instruction the
+agent is expected to follow — it is structurally impossible to commit code
+that fails existing tests through that tool. See
+`harness/tools/git_tool.py` for the actual mechanism.
