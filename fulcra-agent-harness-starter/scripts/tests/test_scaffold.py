@@ -55,6 +55,40 @@ def fake_rapid_prototype_dir(tmp_path: Path) -> Path:
     return rp_dir
 
 
+def _git(*args: str, cwd: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git", *args], cwd=cwd, capture_output=True, text=True, check=True
+    )
+
+
+@pytest.fixture()
+def fake_rapid_prototype_git_repo(tmp_path: Path) -> Path:
+    """Like fake_rapid_prototype_dir, but a REAL git repo with one commit
+    per fulcra-rapid-prototype phase -- mirrors what that skill actually
+    produces, so history-preservation tests exercise real git history,
+    not just files that happen to be JSON/text-identical to it."""
+    rp_dir = tmp_path / "rapid_prototype_git"
+    rp_dir.mkdir()
+    _git("init", "-q", cwd=rp_dir)
+    _git("config", "user.email", "test@example.com", cwd=rp_dir)
+    _git("config", "user.name", "Test User", cwd=rp_dir)
+
+    (rp_dir / "intake").mkdir()
+    (rp_dir / "intake" / "brief.md").write_text(FAKE_BRIEF)
+    _git("add", "-A", cwd=rp_dir)
+    _git("commit", "-q", "-m", "Intake: initial brief", cwd=rp_dir)
+
+    (rp_dir / "architecture.md").write_text(FAKE_ARCHITECTURE)
+    _git("add", "-A", cwd=rp_dir)
+    _git("commit", "-q", "-m", "Architecture: approved by user", cwd=rp_dir)
+
+    (rp_dir / "plan.md").write_text(FAKE_PLAN)
+    _git("add", "-A", cwd=rp_dir)
+    _git("commit", "-q", "-m", "Plan: define milestones", cwd=rp_dir)
+
+    return rp_dir
+
+
 # --- Unit tests for individual helper functions -----------------------
 
 
@@ -103,6 +137,18 @@ def test_read_required_artifact_raises_on_empty_file(tmp_path: Path):
     empty_path.write_text("   \n  ")
     with pytest.raises(scaffold.ScaffoldError):
         scaffold.read_required_artifact(empty_path, "Intake")
+
+
+def test_is_git_working_tree_true_for_real_repo(fake_rapid_prototype_git_repo: Path):
+    assert scaffold.is_git_working_tree(fake_rapid_prototype_git_repo) is True
+
+
+def test_is_git_working_tree_false_for_plain_directory(fake_rapid_prototype_dir: Path):
+    assert scaffold.is_git_working_tree(fake_rapid_prototype_dir) is False
+
+
+def test_is_git_working_tree_false_for_nonexistent_path(tmp_path: Path):
+    assert scaffold.is_git_working_tree(tmp_path / "does_not_exist") is False
 
 
 # --- Integration tests: run the real CLI end-to-end ---------------------
@@ -217,3 +263,149 @@ def test_fails_clearly_when_architecture_missing(tmp_path: Path):
     assert result.returncode != 0
     assert "architecture.md" in result.stderr
     assert "Architecture" in result.stderr
+
+
+# --- Integration tests: git history preservation -------------------------
+
+
+def test_history_auto_preserves_real_phase_commits(
+    fake_rapid_prototype_git_repo: Path, tmp_path: Path
+):
+    """--history=auto (the default) should detect that the
+    rapid-prototype dir is a real git repo and preserve its full commit
+    history in the new project, rather than flattening it -- this is the
+    whole point of the feature: a future session can `git log` the new
+    project and see the real Intake/Architecture/Plan phase commits, not
+    just their content copied into a single scaffold commit."""
+    output_dir = tmp_path / "output"
+    result = subprocess.run(
+        [
+            sys.executable, str(SCAFFOLD_SCRIPT),
+            "--project-name", "Calendar Digest",
+            "--rapid-prototype-dir", str(fake_rapid_prototype_git_repo),
+            "--output-dir", str(output_dir),
+        ],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Preserving fulcra-rapid-prototype git history" in result.stdout
+
+    log = _git("log", "--format=%s", cwd=output_dir).stdout
+    assert "Intake: initial brief" in log
+    assert "Architecture: approved by user" in log
+    assert "Plan: define milestones" in log
+
+    # The rapid-prototype artifacts should be present via the cloned
+    # history, not re-copied as a separate step (no "Copying
+    # fulcra-rapid-prototype artifacts" message for this path).
+    assert "Copying fulcra-rapid-prototype artifacts" not in result.stdout
+    assert (output_dir / "architecture.md").is_file()
+    assert (output_dir / "plan.md").is_file()
+
+    # The cloned repo's "origin" remote (pointing at a throwaway local
+    # tmp_path that won't exist later) must be removed.
+    remotes = _git("remote", cwd=output_dir).stdout.strip()
+    assert remotes == ""
+
+    # Scaffolded files land as new, uncommitted content on top of the
+    # preserved history -- the user commits them themselves (see the
+    # printed "Next steps").
+    status = _git("status", "--short", cwd=output_dir).stdout
+    assert "harness/" in status or "?? harness" in status
+
+
+def test_history_preserve_fails_clearly_on_non_git_source(
+    fake_rapid_prototype_dir: Path, tmp_path: Path
+):
+    """--history=preserve must fail loudly (not silently fall back to
+    copy) when the source isn't actually a git repo -- silently
+    downgrading would defeat the purpose of explicitly requesting
+    preservation."""
+    output_dir = tmp_path / "output"
+    result = subprocess.run(
+        [
+            sys.executable, str(SCAFFOLD_SCRIPT),
+            "--project-name", "Calendar Digest",
+            "--rapid-prototype-dir", str(fake_rapid_prototype_dir),
+            "--output-dir", str(output_dir),
+            "--history", "preserve",
+        ],
+        capture_output=True, text=True,
+    )
+    assert result.returncode != 0
+    assert "not a git working tree" in result.stderr
+    assert not output_dir.exists()
+
+
+def test_history_copy_flattens_even_when_source_is_a_git_repo(
+    fake_rapid_prototype_git_repo: Path, tmp_path: Path
+):
+    """--history=copy should force the flattened (single scaffold
+    commit, artifacts copied as plain content) behavior even when the
+    source IS a real git repo whose history could have been preserved --
+    this is an explicit user override, not just a fallback."""
+    output_dir = tmp_path / "output"
+    result = subprocess.run(
+        [
+            sys.executable, str(SCAFFOLD_SCRIPT),
+            "--project-name", "Calendar Digest",
+            "--rapid-prototype-dir", str(fake_rapid_prototype_git_repo),
+            "--output-dir", str(output_dir),
+            "--history", "copy",
+        ],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Preserving fulcra-rapid-prototype git history" not in result.stdout
+    assert "Copying fulcra-rapid-prototype artifacts" in result.stdout
+    # No git repo should have been created at all by this script -- git
+    # init is a step the user runs themselves afterward (see the printed
+    # "Next steps"), same as in the always-plain-directory case.
+    assert not scaffold.is_git_working_tree(output_dir)
+    assert (output_dir / "architecture.md").is_file()
+
+
+def test_history_preserve_refuses_existing_output_dir(
+    fake_rapid_prototype_git_repo: Path, tmp_path: Path
+):
+    """Preserving history clones into --output-dir, which requires the
+    path to not exist at all yet (git clone's own constraint) -- this
+    should be a clear, specific error, not git's own possibly-confusing
+    message."""
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()  # exists, even though empty
+
+    result = subprocess.run(
+        [
+            sys.executable, str(SCAFFOLD_SCRIPT),
+            "--project-name", "Calendar Digest",
+            "--rapid-prototype-dir", str(fake_rapid_prototype_git_repo),
+            "--output-dir", str(output_dir),
+            "--history", "preserve",
+        ],
+        capture_output=True, text=True,
+    )
+    assert result.returncode != 0
+    assert "already exists" in result.stderr
+
+
+def test_history_auto_falls_back_to_copy_for_non_git_source(
+    fake_rapid_prototype_dir: Path, tmp_path: Path
+):
+    """--history=auto (default) should behave exactly like --history=copy
+    when the source isn't a git repo -- this is the pre-existing behavior
+    from before history preservation was added, and must not regress."""
+    output_dir = tmp_path / "output"
+    result = subprocess.run(
+        [
+            sys.executable, str(SCAFFOLD_SCRIPT),
+            "--project-name", "Calendar Digest",
+            "--rapid-prototype-dir", str(fake_rapid_prototype_dir),
+            "--output-dir", str(output_dir),
+        ],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Preserving fulcra-rapid-prototype git history" not in result.stdout
+    assert "Copying fulcra-rapid-prototype artifacts" in result.stdout
+    assert (output_dir / "architecture.md").is_file()
