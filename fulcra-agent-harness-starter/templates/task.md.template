@@ -1,0 +1,24 @@
+# Task: {{TASK_TITLE}}
+
+## Context
+{{PROJECT_NAME}}: {{PROJECT_DESCRIPTION}}
+
+{{TASK_CONTEXT}}
+
+## Your task right now
+{{TASK_INSTRUCTIONS}}
+
+Keep it minimal and correct rather than elaborate. When you're done, give a
+short summary of the files you created/changed and the test results.
+
+## Reminders (see app/ENGINEERING_STANDARDS.md for the full list)
+- Type hints throughout.
+- Automated tests (pytest) covering this task's acceptance criteria, and
+  the FULL test suite passes — not just tests for what you just changed.
+- Use the `fulcra-api` Python SDK (not the CLI, not subprocess) for any
+  Fulcra integration this task touches.
+- Update `app/features/INDEX.md` and the relevant `app/features/*.md` file
+  if this task completes or advances a tracked feature.
+- Commit your work with `git_commit` once tests pass. Remember: git_commit
+  will refuse to commit if the test suite fails, so make sure it's green
+  first.

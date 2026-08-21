@@ -1,0 +1,20 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# Env / secrets
+.env
+*.key
+
+# Harness runtime state (scratchpads, logs from actual runs)
+harness/state/runs/
+
+# Python test/runtime artifacts that may appear inside app/ once the
+# agent starts running pytest there
+app/.pytest_cache/
+app/**/__pycache__/
+
+# OS
+.DS_Store

@@ -1,0 +1,15 @@
+[project]
+name = "fulcra-agent-harness-starter"
+version = "1.0.0"
+description = "Scaffolds a hand-rolled agent harness for a new Fulcra-backed project, using fulcra-rapid-prototype's Intake/Interview/Architecture/Plan phases to gather requirements first."
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
