@@ -233,6 +233,7 @@ def list_checkpoints(
     expected_task_ids: Optional[List[str]] = None,
     timeout_seconds: float = 0.0,
     poll_interval: float = 0.5,
+    use_cache: bool = True,
 ) -> Dict[str, GitHubBackfillProgress]:
     """Retrieve the latest progress checkpoint for each task_id found in Fulcra.
 
@@ -242,15 +243,10 @@ def list_checkpoints(
         end_time: End of query window (defaults to current time + 5 mins).
         expected_task_ids: If given, poll (up to timeout_seconds) until all
             of these task_ids are present in the result, rather than
-            returning after a single query. Fulcra writes are eventually
-            consistent, so a query run immediately after a write can
-            legitimately miss it for a short window -- callers that know
-            which task_ids they just wrote and need to see them back
-            (e.g. tests) should pass this rather than querying once and
-            treating a miss as a real absence.
-        timeout_seconds: Max seconds to poll for expected_task_ids to
-            appear. Ignored if expected_task_ids is not given.
+            returning after a single query.
+        timeout_seconds: Max seconds to poll for expected_task_ids to appear.
         poll_interval: Seconds between poll attempts.
+        use_cache: Include in-memory cached checkpoints in initial state.
 
     Returns:
         A dict of task_id -> latest GitHubBackfillProgress for that task.
@@ -272,8 +268,11 @@ def list_checkpoints(
     start_poll_time = time.time()
 
     while True:
-        annotations = client.moment_annotations(start_iso, end_iso)
         latest_by_task: Dict[str, GitHubBackfillProgress] = {}
+        if use_cache:
+            latest_by_task.update(_IN_MEMORY_CHECKPOINTS)
+
+        annotations = client.moment_annotations(start_iso, end_iso)
 
         for ann in annotations:
             note_str = ann.get("note")

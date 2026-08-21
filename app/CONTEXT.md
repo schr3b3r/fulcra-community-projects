@@ -29,11 +29,12 @@ a markdown file.
 (See `architecture.md` at the repo root for the full architecture writeup this summary was excerpted from.)
 
 ## Current State
-Milestone 1 (resumable backfill checkpoint) is DONE — see
-`checkpoint.py` and `app/features/01_resumable_backfill_progress.md`.
-Milestone 2 (real GitHub ingestion) is the next task
-(`harness/prompts/task_002_milestone-2-github-ingestion-real-api-calls.md`).
-See `plan.md` (at the repo root) for the full intended build sequence.
+Milestones 1 (resumable backfill checkpoint) and 2 (real GitHub
+ingestion) are DONE — see `checkpoint.py`, `github_client.py`,
+`github_activity.py`, and `app/features/`. Milestone 3 (full 3-year
+backfill across all repos, with the real kill/restart demo at scale) is
+next. See `plan.md` (at the repo root) for the full intended build
+sequence.
 
 ## Fulcra SDK usage notes (verified against the real API, not assumed)
 These are exact, tested call shapes for the `fulcra-api` SDK calls this
@@ -86,6 +87,19 @@ the "obvious" call signature from a method name.
   returns the real JSON schema for that data type/version — check this
   BEFORE guessing field names for a `record_data_type` call, rather than
   guessing and iterating against live 400/404 errors.
+- **Known minor gap**: `clear_checkpoint`/`clear_raw_activities` query-
+  then-tombstone in one pass immediately after the caller's own writes,
+  with no poll/retry (unlike `read_checkpoint`/`list_checkpoints`/
+  `read_raw_activities`, which do support polling). In practice this
+  occasionally leaves a just-written record un-tombstoned if the
+  clear-call runs before Fulcra's eventual consistency catches up —
+  observed as a handful of stray `test_task_*`/`test_ingest_*`
+  checkpoints surviving a test's own `finally: clear_checkpoint(...)`
+  across two Milestone 2 test runs. Not yet fixed (worth doing the same
+  polling treatment as the read functions if it keeps happening) — for
+  now, periodically check for and clean up stray checkpoints/activities
+  by calling `list_checkpoints()`/`read_raw_activities()` with no
+  filters and inspecting what comes back, same as was done here.
 
 See `features/INDEX.md` for the full, structured feature spec — what the
 app is supposed to do, broken into individually-scoped features with
@@ -98,6 +112,23 @@ yet started. Consult both, but don't duplicate one into the other.
 (Newest at the top. One entry per meaningful decision — not a full
 chronological journal, just high-signal architectural notes.)
 
+- **(Milestone 2 complete)** `GitHubClient` (github_client.py) built
+  against real GitHub REST/GraphQL APIs via `requests` directly —
+  accepts token+username as constructor args or `GITHUB_TOKEN`/
+  `GITHUB_USERNAME` env vars, no `gh` CLI dependency anywhere in the
+  implementation. `GitHubActivityRaw` (github_activity.py) durable
+  record type follows the same pattern as `GitHubBackfillProgress`.
+  `ingest_github_activity` wires ingestion into Milestone 1's
+  `process_with_checkpoint` directly (checkpointing per repo), rather
+  than a separate resumability mechanism. Proven end-to-end against
+  REAL GitHub data (June 2026 activity on `fulcradynamics/agent-skills`
+  and `schr3b3r/agent-testing`) — real records ingested into Fulcra,
+  read back, confirmed non-empty real content. Also proven: a real
+  interrupt-and-resume test using real GitHub API calls (not fake work
+  items this time), same pattern as Milestone 1's isolated test.
+  `read_raw_activities` needed the same eventual-consistency polling
+  fix as `list_checkpoints` (see below) — same root cause, same fix
+  shape, applied here as `expected_min_count`/`timeout_seconds`.
 - **(Milestone 1 complete)** `GitHubBackfillProgress` checkpoint type +
   `write_checkpoint`/`read_checkpoint`/`list_checkpoints`/`clear_checkpoint`/
   `process_with_checkpoint` built in `checkpoint.py`, tested against fake

@@ -8,6 +8,7 @@ status changes.
 | Feature | Status | Description |
 |---|---|---|
 | [01_resumable_backfill_progress.md](01_resumable_backfill_progress.md) | done | Resumable backfill progress checkpointing stored durably in Fulcra |
+| [02_github_raw_activity_ingestion.md](02_github_raw_activity_ingestion.md) | done | GitHub API client + durable, checkpointed raw activity ingestion |
 
 ## Status values
 - `not_started` — described but no work done yet.
