@@ -228,6 +228,92 @@ def extract_first_plan_milestone(plan_md: str) -> tuple[str, str]:
     return title, body
 
 
+def extract_brief_description(brief_md: str) -> str:
+    """Derive a one-paragraph project description from intake/brief.md,
+    for hydrating PROJECT_DESCRIPTION.
+
+    fulcra-rapid-prototype's Intake template typically starts brief.md
+    with a markdown heading (e.g. "# Intake Brief: <name>") before the
+    actual summary prose. Naively taking "the first \\n\\n-delimited
+    block" without skipping that heading previously produced a
+    PROJECT_DESCRIPTION that was just the heading text itself (a few
+    words), which then caused a second bug downstream: because that
+    "description" was so short, later string-concatenation logic that
+    assumed a substantial description ended up looking broken. This
+    function skips any leading '#'-prefixed heading lines before taking
+    the first real paragraph.
+
+    Falls back to a whole-brief excerpt (truncated at a word boundary,
+    not a blind character slice that could cut mid-word) if the first
+    real paragraph is implausibly long (e.g. the brief has no blank-line
+    paragraph breaks at all).
+    """
+    lines = brief_md.strip().splitlines()
+    # Skip leading heading lines (and any blank lines directly after
+    # them) to find where the real prose starts.
+    start_idx = 0
+    while start_idx < len(lines) and (
+        lines[start_idx].strip() == "" or lines[start_idx].lstrip().startswith("#")
+    ):
+        start_idx += 1
+    remaining = "\n".join(lines[start_idx:]).strip()
+
+    if not remaining:
+        # The whole brief was headings/blank lines (degenerate input) --
+        # fall back to the raw brief text rather than returning an empty
+        # description.
+        remaining = brief_md.strip()
+
+    first_paragraph = remaining.split("\n\n", 1)[0].strip()
+
+    if len(first_paragraph) <= 500:
+        return first_paragraph
+
+    # Too long -- truncate at the last word boundary before 500 chars
+    # rather than cutting mid-word.
+    truncated = first_paragraph[:500]
+    last_space = truncated.rfind(" ")
+    if last_space > 0:
+        truncated = truncated[:last_space]
+    return truncated.rstrip() + "..."
+
+
+def extract_architecture_summary(architecture_md: str) -> str:
+    """Derive a short architecture summary for CONTEXT.md's "The Product"
+    section, rather than embedding the FULL architecture.md verbatim.
+
+    architecture.md is already copied into the new project's repo root
+    (via history preservation or the plain-copy fallback), so duplicating
+    its entire contents inside CONTEXT.md too is pure redundancy --
+    previously this made CONTEXT.md unwieldy for any project whose real
+    architecture doc was more than a paragraph or two (which is the
+    common case for anything non-trivial).
+
+    Looks for a "## Summary" section (the convention this starter kit's
+    own architecture.md.template-adjacent docs use) and returns just
+    that section's text. Falls back to the first paragraph of the whole
+    document if no such section exists, so this still produces something
+    reasonable for an architecture.md that doesn't follow that exact
+    convention.
+    """
+    summary_heading_pattern = re.compile(
+        r"^#{1,3}\s+Summary\s*$", re.MULTILINE | re.IGNORECASE
+    )
+    match = summary_heading_pattern.search(architecture_md)
+    if match is None:
+        # No "## Summary" section -- fall back to the first real
+        # paragraph of the document (reusing the same heading-skipping
+        # logic as extract_brief_description, since architecture.md
+        # typically starts with its own "# Architecture: <name>" title).
+        return extract_brief_description(architecture_md)
+
+    start = match.end()
+    next_heading_pattern = re.compile(r"^#{1,3}\s+\S", re.MULTILINE)
+    next_match = next_heading_pattern.search(architecture_md, start)
+    end = next_match.start() if next_match else len(architecture_md)
+    return architecture_md[start:end].strip()
+
+
 def slugify(text: str) -> str:
     """Turn a project name into a filesystem/package-safe slug, e.g.
     'Acme Widget Tracker' -> 'acme-widget-tracker'. Deliberately simple
@@ -319,7 +405,11 @@ def main() -> int:
             "bullet per line) describing which established libraries this "
             "project should prefer for its actual domain — e.g. audio/DSP, "
             "web framework, etc. Left blank, ENGINEERING_STANDARDS.md will "
-            "have a placeholder reminding you to fill this in by hand."
+            "have a placeholder reminding you to fill this in by hand. "
+            "Do NOT include your own 'Fulcra integration' bullet here -- "
+            "the generated ENGINEERING_STANDARDS.md.template already has "
+            "one immediately after this guidance is inserted; duplicating "
+            "it produces two conflicting bullets back to back."
         ),
     )
     parser.add_argument(
@@ -406,12 +496,11 @@ def main() -> int:
     project_name = args.project_name
     project_slug = slugify(project_name)
 
-    # Derive a one-paragraph description from the brief (its first
+    # Derive a one-paragraph description from the brief (its first real
     # paragraph is expected to be a short summary per fulcra-rapid-
-    # prototype's Intake template) -- fall back to the whole brief if it's
-    # already short.
-    first_paragraph = brief.split("\n\n", 1)[0].strip()
-    project_description = first_paragraph if len(first_paragraph) < 500 else brief[:500]
+    # prototype's Intake template) -- fall back to a truncated version of
+    # the whole brief if that paragraph is too long.
+    project_description = extract_brief_description(brief)
 
     try:
         task_title, task_body = extract_first_plan_milestone(plan)
@@ -430,7 +519,11 @@ def main() -> int:
         "PROJECT_NAME": project_name,
         "PROJECT_SLUG": project_slug,
         "PROJECT_DESCRIPTION": project_description,
-        "ARCHITECTURE_SUMMARY": architecture,
+        "ARCHITECTURE_SUMMARY": (
+            extract_architecture_summary(architecture)
+            + "\n\n(See `architecture.md` at the repo root for the full "
+            "architecture writeup this summary was excerpted from.)"
+        ),
         "CURRENT_STATE": (
             "Freshly scaffolded — no code written yet. See `plan.md` "
             "(at the repo root) for the intended build sequence."

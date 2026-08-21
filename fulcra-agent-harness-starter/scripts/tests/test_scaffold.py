@@ -27,13 +27,15 @@ import scaffold  # noqa: E402
 
 
 FAKE_BRIEF = (
+    "# Intake Brief: Calendar Digest\n\n"
     "A CLI tool that watches a user's Fulcra calendar events and sends a "
     "daily digest summarizing tomorrow's schedule.\n\n"
     "## Goals\n- Summarize tomorrow's events every evening.\n"
 )
 FAKE_ARCHITECTURE = (
-    "# Architecture\n\nMaps CalendarEvent to a new DailyDigest annotation "
-    "type. No gaps identified.\n"
+    "# Architecture: Calendar Digest\n\n"
+    "## Summary\n"
+    "Maps CalendarEvent to a new DailyDigest annotation type. No gaps identified.\n"
 )
 FAKE_PLAN = (
     "# Plan\n\n"
@@ -151,6 +153,88 @@ def test_is_git_working_tree_false_for_nonexistent_path(tmp_path: Path):
     assert scaffold.is_git_working_tree(tmp_path / "does_not_exist") is False
 
 
+def test_extract_brief_description_skips_leading_heading():
+    """Regression test for a real bug found using this script on a real
+    project: a brief.md starting with '# Intake Brief: <name>' (the
+    literal fulcra-rapid-prototype convention) before any real prose
+    previously produced a PROJECT_DESCRIPTION that was just the heading
+    text itself, since the old logic took 'the first \\n\\n-delimited
+    block' without skipping the heading line first."""
+    brief = (
+        "# Intake Brief: Engineering Journey\n\n"
+        "A tool that summarizes a developer's GitHub activity into a "
+        "readable retrospective.\n\n"
+        "## Goals\n- Show the journey over time.\n"
+    )
+    description = scaffold.extract_brief_description(brief)
+    assert description == (
+        "A tool that summarizes a developer's GitHub activity into a "
+        "readable retrospective."
+    )
+    assert "Intake Brief" not in description
+
+
+def test_extract_brief_description_no_heading_at_all():
+    brief = "Just a plain first paragraph with no heading.\n\nMore text."
+    assert scaffold.extract_brief_description(brief) == (
+        "Just a plain first paragraph with no heading."
+    )
+
+
+def test_extract_brief_description_truncates_long_paragraph_at_word_boundary():
+    long_paragraph = "word " * 200  # ~1000 chars, well over the 500 cutoff
+    description = scaffold.extract_brief_description(long_paragraph.strip())
+    assert len(description) <= 504  # 500 + "..." plus a little slack
+    assert description.endswith("...")
+    # Must not have cut off mid-word -- every "word" in the truncated
+    # portion (before the ellipsis) should be a complete, real "word".
+    body = description[:-3].strip()
+    assert all(token == "word" for token in body.split())
+
+
+def test_extract_brief_description_degenerate_heading_only_input():
+    """A brief that's ONLY a heading (no real prose at all) shouldn't
+    produce an empty description -- fall back to the raw text rather
+    than returning nothing."""
+    brief = "# Intake Brief: Nothing Else Here"
+    description = scaffold.extract_brief_description(brief)
+    assert description != ""
+
+
+def test_extract_architecture_summary_pulls_summary_section_only():
+    """Regression test for a real bug: ARCHITECTURE_SUMMARY previously
+    embedded the ENTIRE architecture.md verbatim into CONTEXT.md, making
+    it unwieldy for any non-trivial architecture doc and duplicating
+    content already present in the separately-copied architecture.md
+    file. This should extract just the '## Summary' section."""
+    architecture = (
+        "# Architecture: Engineering Journey\n\n"
+        "## Summary\n"
+        "A tool that backfills GitHub activity and generates a narrative.\n\n"
+        "## Capability map\n"
+        "Lots of detail here that should NOT appear in the short summary, "
+        "including a very long capability breakdown that goes on for a "
+        "while and would make CONTEXT.md unwieldy if embedded in full.\n"
+    )
+    summary = scaffold.extract_architecture_summary(architecture)
+    assert "A tool that backfills GitHub activity" in summary
+    assert "Capability map" not in summary
+    assert "unwieldy" not in summary  # from the (excluded) Capability map section
+
+
+def test_extract_architecture_summary_falls_back_without_summary_heading():
+    """If architecture.md doesn't follow the '## Summary' convention,
+    fall back to a short excerpt rather than either erroring or
+    embedding the whole document."""
+    architecture = (
+        "# Architecture: Something\n\n"
+        "This project maps X to Y with no gaps.\n\n"
+        "## Some Other Section\nMore detail.\n"
+    )
+    summary = scaffold.extract_architecture_summary(architecture)
+    assert summary == "This project maps X to Y with no gaps."
+
+
 # --- Integration tests: run the real CLI end-to-end ---------------------
 
 
@@ -198,6 +282,17 @@ def test_real_run_produces_expected_files(fake_rapid_prototype_dir: Path, tmp_pa
     context = (output_dir / "app" / "CONTEXT.md").read_text()
     assert "Calendar Digest" in context
     assert "{{" not in context
+    # Regression checks for two real bugs found scaffolding a real
+    # project: (1) PROJECT_DESCRIPTION must not be just the brief's own
+    # leading heading text; (2) ARCHITECTURE_SUMMARY must not embed the
+    # ENTIRE architecture.md verbatim (making CONTEXT.md unwieldy and
+    # duplicating the separately-copied architecture.md file) -- see
+    # test_extract_brief_description_* and
+    # test_extract_architecture_summary_* for focused unit coverage of
+    # both fixes; this just confirms the real CLI path doesn't regress
+    # to leaking the raw heading text into the hydrated CONTEXT.md.
+    assert "# Intake Brief" not in context
+    assert "# Architecture:" not in context
 
     standards = (output_dir / "app" / "ENGINEERING_STANDARDS.md").read_text()
     assert "{{" not in standards
