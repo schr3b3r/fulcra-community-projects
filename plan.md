@@ -1,14 +1,13 @@
 # Plan: Engineering Journey
 
-## Sequencing philosophy
-Resumable backfill checkpointing is both the riskiest unproven piece
-(Architecture risk #3) and the mechanism everything else depends on — if
-it's wrong, every layer built on top inherits the mistake. It goes first,
-proven in isolation with a real kill/restart test, before any real
-GitHub data ingestion or rollup logic is built on top of it. This mirrors
-how flow-state-v2 was built: prove the foundational plumbing (WebSocket
-streaming, in that case) end-to-end before layering DSP/publishing logic
-on top of it.
+**Sequencing philosophy:** Resumable backfill checkpointing is both the
+riskiest unproven piece (Architecture risk #3) and the mechanism
+everything else depends on — if it's wrong, every layer built on top
+inherits the mistake. It goes first, proven in isolation with a real
+kill/restart test, before any real GitHub data ingestion or rollup logic
+is built on top of it. This mirrors how flow-state-v2 was built: prove
+the foundational plumbing (WebSocket streaming, in that case) end-to-end
+before layering DSP/publishing logic on top of it.
 
 Milestones below are also the harness's task-by-task build sequence —
 each one is scoped to be a single harness task (see
