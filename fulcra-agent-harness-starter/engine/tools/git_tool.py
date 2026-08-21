@@ -40,7 +40,7 @@ from harness.tools.filesystem import SANDBOX_ROOT
 TEST_RUNNER_TIMEOUT_SECONDS = 120
 
 # Same trick as harness/tools/run_command.py: point at the harness's own
-# venv so `pytest` resolves to an environment with the app's dependencies
+# venv so pytest resolves to an environment with the app's dependencies
 # already installed, without the agent needing to manage its own venv.
 _HARNESS_VENV_BIN = SANDBOX_ROOT.parent / ".venv" / "bin"
 
@@ -58,11 +58,29 @@ def _test_suite_exists() -> bool:
 
 
 def _run_test_suite() -> subprocess.CompletedProcess:
-    """Run pytest against the whole app/ sandbox and return the result."""
-    pytest_bin = _HARNESS_VENV_BIN / "pytest"
-    command = str(pytest_bin) if pytest_bin.exists() else "pytest"
+    """Run pytest against the whole app/ sandbox and return the result.
+
+    Deliberately invoked as `python -m pytest`, NOT the bare `pytest`
+    executable. This matters, and got this exactly backwards once
+    already: `python -m X` prepends the current working directory (as
+    `''`) to `sys.path` (standard Python `-m` semantics), while the bare
+    `pytest` entry-point script does not. Since app/tests/ has no
+    `__init__.py` (a deliberate, normal choice, not a bug), pytest's
+    default "prepend" import mode only adds `tests/` itself to
+    `sys.path` -- never `app/`, its parent. Any test file that does a
+    plain top-level `import fulcra_client` or `import <sibling module in
+    app/>` -- which is exactly the pattern this starter kit's own
+    `ENGINEERING_STANDARDS.md` and `app/fulcra_client.py` encourage --
+    would then fail to import under bare `pytest`, but succeed under
+    `python -m pytest`. This was found as a REAL failure: git_commit
+    refused a commit with "ModuleNotFoundError: No module named
+    'fulcra_client'" even though the exact same test suite passed cleanly
+    moments earlier via `python -m pytest`.
+    """
+    python_bin = _HARNESS_VENV_BIN / "python"
+    python = str(python_bin) if python_bin.exists() else "python"
     return subprocess.run(
-        [command, "-q"],
+        [python, "-m", "pytest", "-q"],
         cwd=SANDBOX_ROOT,
         capture_output=True,
         text=True,
