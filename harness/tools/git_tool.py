@@ -37,7 +37,7 @@ import subprocess
 
 from harness.tools.filesystem import SANDBOX_ROOT
 
-TEST_RUNNER_TIMEOUT_SECONDS = 120
+TEST_RUNNER_TIMEOUT_SECONDS = 300
 
 # Same trick as harness/tools/run_command.py: point at the harness's own
 # venv so pytest resolves to an environment with the app's dependencies
