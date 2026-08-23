@@ -144,15 +144,8 @@ def read_raw_activities(
         end_time: End of query window (defaults to current time + 5 mins).
         client: Optional authenticated FulcraAPI client.
         expected_min_count: If > 0, poll (up to timeout_seconds) until at
-            least this many matching records are found, rather than
-            returning after a single query. Fulcra writes are eventually
-            consistent, so a query run immediately after a write can
-            legitimately return fewer records than were just written --
-            callers that know how many records they just wrote and need
-            to see them all back (e.g. tests) should pass this rather
-            than querying once and treating a short result as authoritative.
-        timeout_seconds: Max seconds to poll for expected_min_count to be
-            reached. Ignored if expected_min_count is 0.
+            least this many matching records are found.
+        timeout_seconds: Max seconds to poll for expected_min_count.
         poll_interval: Seconds between poll attempts.
 
     Returns:
@@ -271,6 +264,183 @@ def clear_raw_activities(
     return len(tombstones)
 
 
+def _parse_datetime(val: Union[datetime, str]) -> datetime:
+    if isinstance(val, datetime):
+        if val.tzinfo is None:
+            return val.replace(tzinfo=timezone.utc)
+        return val
+    dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def generate_period_chunks(
+    start_date: Union[datetime, str],
+    end_date: Union[datetime, str],
+    recent_days: int = 90,
+    recent_step_days: int = 7,
+    older_step_days: int = 30,
+) -> List[Dict[str, Any]]:
+    """Divide a date window into period chunks with decaying granularity.
+
+    The most recent `recent_days` (default 90) are chunked at `recent_step_days` (default 7/weekly).
+    Older periods are chunked at `older_step_days` (default 30/monthly).
+
+    Returns:
+        List of dicts: [{'start_date': 'YYYY-MM-DD', 'end_date': 'YYYY-MM-DD', 'granularity': 'monthly'|'weekly'}]
+    """
+    start_dt = _parse_datetime(start_date)
+    end_dt = _parse_datetime(end_date)
+
+    if start_dt >= end_dt:
+        return []
+
+    cutoff_90d = end_dt - timedelta(days=recent_days)
+    chunks: List[Dict[str, Any]] = []
+
+    # Older window: monthly chunks (~30 days)
+    curr = start_dt
+    while curr < cutoff_90d:
+        chunk_end = min(curr + timedelta(days=older_step_days - 1), cutoff_90d - timedelta(days=1))
+        if chunk_end < curr:
+            break
+        chunks.append(
+            {
+                "start_date": curr.strftime("%Y-%m-%d"),
+                "end_date": chunk_end.strftime("%Y-%m-%d"),
+                "granularity": "monthly",
+            }
+        )
+        curr = chunk_end + timedelta(days=1)
+
+    # Recent window: weekly chunks (~7 days)
+    curr = max(cutoff_90d, start_dt)
+    while curr < end_dt:
+        chunk_end = min(curr + timedelta(days=recent_step_days - 1), end_dt)
+        if chunk_end < curr:
+            break
+        chunks.append(
+            {
+                "start_date": curr.strftime("%Y-%m-%d"),
+                "end_date": chunk_end.strftime("%Y-%m-%d"),
+                "granularity": "weekly",
+            }
+        )
+        curr = chunk_end + timedelta(days=1)
+
+    return chunks
+
+
+def build_backfill_work_items(
+    repo_names: List[str], period_chunks: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """Build the ordered work item list combining repositories and period chunks.
+
+    Work items are ordered chronologically by period, then by repository name.
+
+    Returns:
+        List of work item dicts: [{'repo_name': ..., 'start_date': ..., 'end_date': ..., 'granularity': ...}]
+    """
+    items: List[Dict[str, Any]] = []
+    sorted_repos = sorted(repo_names)
+
+    for chunk in period_chunks:
+        for repo in sorted_repos:
+            items.append(
+                {
+                    "repo_name": repo,
+                    "start_date": chunk["start_date"],
+                    "end_date": chunk["end_date"],
+                    "granularity": chunk.get("granularity", "unknown"),
+                }
+            )
+
+    return items
+
+
+def _ingest_single_item_activity(
+    gh_client: GitHubClient,
+    repo_name: str,
+    start_date: str,
+    end_date: str,
+    client: Optional[FulcraAPI] = None,
+) -> int:
+    """Fetch commits, PRs, issues for a single repo and date range, storing in Fulcra."""
+    username = gh_client.username
+    activities: List[GitHubActivityRaw] = []
+
+    # Fetch commits
+    commits = gh_client.fetch_commits(repo_name, start_date, end_date)
+    for c in commits:
+        msg = c.get("commit", {}).get("message", "")
+        summary = msg.split("\n")[0] if msg else ""
+        activities.append(
+            GitHubActivityRaw(
+                activity_type="commit",
+                activity_id=c.get("sha", ""),
+                repo_name=repo_name,
+                username=username,
+                timestamp=c.get("commit", {}).get("author", {}).get("date")
+                or datetime.now(timezone.utc).isoformat(),
+                title_or_summary=summary,
+                body=msg,
+                url=c.get("html_url"),
+                metadata={
+                    "sha": c.get("sha"),
+                    "author": c.get("commit", {}).get("author"),
+                },
+            )
+        )
+
+    # Fetch PRs
+    prs = gh_client.fetch_pull_requests(repo_name, start_date, end_date)
+    for pr in prs:
+        activities.append(
+            GitHubActivityRaw(
+                activity_type="pull_request",
+                activity_id=str(pr.get("number", "")),
+                repo_name=repo_name,
+                username=username,
+                timestamp=pr.get("created_at")
+                or datetime.now(timezone.utc).isoformat(),
+                title_or_summary=pr.get("title", ""),
+                body=pr.get("body"),
+                url=pr.get("html_url"),
+                metadata={
+                    "number": pr.get("number"),
+                    "state": pr.get("state"),
+                },
+            )
+        )
+
+    # Fetch Issues
+    issues = gh_client.fetch_issues(repo_name, start_date, end_date)
+    for iss in issues:
+        activities.append(
+            GitHubActivityRaw(
+                activity_type="issue",
+                activity_id=str(iss.get("number", "")),
+                repo_name=repo_name,
+                username=username,
+                timestamp=iss.get("created_at")
+                or datetime.now(timezone.utc).isoformat(),
+                title_or_summary=iss.get("title", ""),
+                body=iss.get("body"),
+                url=iss.get("html_url"),
+                metadata={
+                    "number": iss.get("number"),
+                    "state": iss.get("state"),
+                },
+            )
+        )
+
+    if activities:
+        write_raw_activities(activities, client=client)
+
+    return len(activities)
+
+
 def ingest_github_activity(
     gh_client: GitHubClient,
     start_date: str,
@@ -317,81 +487,14 @@ def ingest_github_activity(
 
     def process_fn(item: Dict[str, Any], idx: int) -> None:
         nonlocal ingested_count
-        repo = item["repo_name"]
-        activities: List[GitHubActivityRaw] = []
-
-        # Fetch commits
-        commits = gh_client.fetch_commits(repo, item["start_date"], item["end_date"])
-        for c in commits:
-            msg = c.get("commit", {}).get("message", "")
-            summary = msg.split("\n")[0] if msg else ""
-            activities.append(
-                GitHubActivityRaw(
-                    activity_type="commit",
-                    activity_id=c.get("sha", ""),
-                    repo_name=repo,
-                    username=username,
-                    timestamp=c.get("commit", {}).get("author", {}).get("date")
-                    or datetime.now(timezone.utc).isoformat(),
-                    title_or_summary=summary,
-                    body=msg,
-                    url=c.get("html_url"),
-                    metadata={
-                        "sha": c.get("sha"),
-                        "author": c.get("commit", {}).get("author"),
-                    },
-                )
-            )
-
-        # Fetch PRs
-        prs = gh_client.fetch_pull_requests(
-            repo, item["start_date"], item["end_date"]
+        count = _ingest_single_item_activity(
+            gh_client,
+            repo_name=item["repo_name"],
+            start_date=item["start_date"],
+            end_date=item["end_date"],
+            client=client,
         )
-        for pr in prs:
-            activities.append(
-                GitHubActivityRaw(
-                    activity_type="pull_request",
-                    activity_id=str(pr.get("number", "")),
-                    repo_name=repo,
-                    username=username,
-                    timestamp=pr.get("created_at")
-                    or datetime.now(timezone.utc).isoformat(),
-                    title_or_summary=pr.get("title", ""),
-                    body=pr.get("body"),
-                    url=pr.get("html_url"),
-                    metadata={
-                        "number": pr.get("number"),
-                        "state": pr.get("state"),
-                    },
-                )
-            )
-
-        # Fetch Issues
-        issues = gh_client.fetch_issues(
-            repo, item["start_date"], item["end_date"]
-        )
-        for iss in issues:
-            activities.append(
-                GitHubActivityRaw(
-                    activity_type="issue",
-                    activity_id=str(iss.get("number", "")),
-                    repo_name=repo,
-                    username=username,
-                    timestamp=iss.get("created_at")
-                    or datetime.now(timezone.utc).isoformat(),
-                    title_or_summary=iss.get("title", ""),
-                    body=iss.get("body"),
-                    url=iss.get("html_url"),
-                    metadata={
-                        "number": iss.get("number"),
-                        "state": iss.get("state"),
-                    },
-                )
-            )
-
-        if activities:
-            write_raw_activities(activities, client=client)
-            ingested_count += len(activities)
+        ingested_count += count
 
     checkpoint_result = process_with_checkpoint(
         task_id=task_id,
@@ -412,4 +515,98 @@ def ingest_github_activity(
         "repos_processed": [it["repo_name"] for it in items[:completed_count]],
         "activities_count": ingested_count,
         "resumed_from_index": checkpoint_result.get("resumed_from_index"),
+    }
+
+
+def backfill_full_github_activity(
+    gh_client: GitHubClient,
+    start_date: Optional[Union[datetime, str]] = None,
+    end_date: Optional[Union[datetime, str]] = None,
+    repo_names: Optional[List[str]] = None,
+    client: Optional[FulcraAPI] = None,
+    stage: str = "full_3year_backfill",
+    interrupt_at_index: Optional[int] = None,
+    task_id: Optional[str] = None,
+    use_cache: bool = True,
+) -> Dict[str, Any]:
+    """Execute a full ~3-year multi-repo, multi-period activity backfill with checkpointing.
+
+    Args:
+        gh_client: Configured GitHubClient instance.
+        start_date: Start date (defaults to ~3 years before end_date).
+        end_date: End date (defaults to current time in UTC).
+        repo_names: Explicit list of repositories. If None, enumerates across full window.
+        client: Optional authenticated FulcraAPI client.
+        stage: Backfill stage identifier.
+        interrupt_at_index: Optional 0-based index at which to simulate process failure.
+        task_id: Custom checkpoint task ID.
+        use_cache: Whether to use process-local memory cache when reading checkpoints.
+
+    Returns:
+        Summary dict of backfill execution.
+    """
+    if client is None:
+        client = get_fulcra_client()
+
+    now = datetime.now(timezone.utc)
+    if end_date is None:
+        end_dt = now
+    else:
+        end_dt = _parse_datetime(end_date)
+
+    if start_date is None:
+        start_dt = end_dt - timedelta(days=365 * 3)
+    else:
+        start_dt = _parse_datetime(start_date)
+
+    start_str = start_dt.strftime("%Y-%m-%d")
+    end_str = end_dt.strftime("%Y-%m-%d")
+
+    if repo_names is None:
+        repo_names = gh_client.enumerate_repositories(start_dt, end_dt)
+
+    if not task_id:
+        task_id = f"backfill_3yr:{gh_client.username}:{start_str}_{end_str}"
+
+    period_chunks = generate_period_chunks(start_dt, end_dt)
+    items = build_backfill_work_items(repo_names, period_chunks)
+
+    ingested_count = 0
+
+    def process_fn(item: Dict[str, Any], idx: int) -> None:
+        nonlocal ingested_count
+        count = _ingest_single_item_activity(
+            gh_client,
+            repo_name=item["repo_name"],
+            start_date=item["start_date"],
+            end_date=item["end_date"],
+            client=client,
+        )
+        ingested_count += count
+
+    checkpoint_result = process_with_checkpoint(
+        task_id=task_id,
+        items=items,
+        process_fn=process_fn,
+        client=client,
+        interrupt_at_index=interrupt_at_index,
+        stage=stage,
+        use_cache=use_cache,
+        metadata={
+            "total_repos": len(repo_names),
+            "total_periods": len(period_chunks),
+            "username": gh_client.username,
+        },
+    )
+
+    return {
+        "status": checkpoint_result["status"],
+        "task_id": task_id,
+        "completed_items_count": checkpoint_result["completed_items_count"],
+        "total_items": len(items),
+        "repo_names": repo_names,
+        "period_chunks_count": len(period_chunks),
+        "processed_indices": checkpoint_result["processed_indices"],
+        "resumed_from_index": checkpoint_result.get("resumed_from_index"),
+        "activities_count": ingested_count,
     }

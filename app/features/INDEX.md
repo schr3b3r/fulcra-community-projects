@@ -9,6 +9,7 @@ status changes.
 |---|---|---|
 | [01_resumable_backfill_progress.md](01_resumable_backfill_progress.md) | done | Resumable backfill progress checkpointing stored durably in Fulcra |
 | [02_github_raw_activity_ingestion.md](02_github_raw_activity_ingestion.md) | done | GitHub API client + durable, checkpointed raw activity ingestion |
+| [03_full_3year_backfill_chunking_resumability.md](03_full_3year_backfill_chunking_resumability.md) | done | Full ~3-year multi-repo/multi-period chunked backfill with real at-scale resumability |
 
 ## Status values
 - `not_started` — described but no work done yet.

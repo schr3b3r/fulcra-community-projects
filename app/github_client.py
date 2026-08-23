@@ -5,8 +5,10 @@ library. Accepts runtime configuration (token, username) via constructor
 arguments or environment variables (`GITHUB_TOKEN`, `GITHUB_USERNAME`).
 """
 
+from datetime import datetime, timedelta, timezone
 import os
-from typing import Any, Dict, List, Optional
+import time
+from typing import Any, Dict, List, Optional, Union
 import requests
 
 
@@ -184,6 +186,57 @@ class GitHubClient:
             "issue_repositories": issue_repos,
         }
 
+    def enumerate_repositories(
+        self,
+        start_date: Optional[Union[datetime, str]] = None,
+        end_date: Optional[Union[datetime, str]] = None,
+    ) -> List[str]:
+        """Enumerate all repositories contributed to across a date window (e.g. 3 years).
+
+        Queries GraphQL contributionsCollection in <= 1-year windows to comply with
+        GitHub API constraints.
+
+        Args:
+            start_date: Start of query window (defaults to 3 years ago).
+            end_date: End of query window (defaults to current time in UTC).
+
+        Returns:
+            Sorted list of unique repository names ('owner/repo').
+        """
+        now = datetime.now(timezone.utc)
+        if end_date is None:
+            end_dt = now
+        elif isinstance(end_date, str):
+            end_dt = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+            if end_dt.tzinfo is None:
+                end_dt = end_dt.replace(tzinfo=timezone.utc)
+        else:
+            end_dt = end_date
+
+        if start_date is None:
+            start_dt = end_dt - timedelta(days=365 * 3)
+        elif isinstance(start_date, str):
+            start_dt = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
+            if start_dt.tzinfo is None:
+                start_dt = start_dt.replace(tzinfo=timezone.utc)
+        else:
+            start_dt = start_date
+
+        repo_set = set()
+        curr = start_dt
+
+        while curr < end_dt:
+            window_end = min(curr + timedelta(days=365), end_dt)
+            start_str = curr.strftime("%Y-%m-%d")
+            end_str = window_end.strftime("%Y-%m-%d")
+
+            collection = self.get_contributions_collection(start_str, end_str)
+            repo_set.update(collection.get("repositories", []))
+
+            curr = window_end + timedelta(days=1)
+
+        return sorted(list(repo_set))
+
     def fetch_commits(
         self, repo_name: str, start_date: str, end_date: str
     ) -> List[Dict[str, Any]]:
@@ -217,11 +270,25 @@ class GitHubClient:
         url = f"{self.base_url}/search/issues"
         return self._paginate_search(url, query)
 
-    def _paginate_search(self, url: str, query: str) -> List[Dict[str, Any]]:
-        """Helper to handle paginated REST Search API requests."""
+    def _paginate_search(
+        self, url: str, query: str, max_rate_limit_retries: int = 5
+    ) -> List[Dict[str, Any]]:
+        """Helper to handle paginated REST Search API requests.
+
+        GitHub's Search API has a stricter rate limit (30 req/min for
+        authenticated requests) than the core REST API -- empirically hit
+        during Milestone 3's real multi-repo/multi-period backfill (3
+        search calls per work item, tens of items in quick succession
+        exceeds this easily). On a 403 that looks like a rate-limit
+        response, sleep until the limit resets (per `Retry-After` or
+        `X-RateLimit-Reset`, whichever is present) and retry, up to
+        `max_rate_limit_retries` times, rather than failing the whole
+        backfill on a transient/expected condition.
+        """
         items: List[Dict[str, Any]] = []
         page = 1
         per_page = 100
+        rate_limit_retries = 0
 
         while True:
             try:
@@ -232,6 +299,17 @@ class GitHubClient:
                 )
             except requests.RequestException as exc:
                 raise GitHubAPIError(f"Search request failed: {exc}") from exc
+
+            if response.status_code == 403 and self._is_rate_limit_response(response):
+                if rate_limit_retries >= max_rate_limit_retries:
+                    raise GitHubAPIError(
+                        f"Search API rate limit exceeded after "
+                        f"{max_rate_limit_retries} retries: {response.text}"
+                    )
+                wait_seconds = self._rate_limit_wait_seconds(response)
+                rate_limit_retries += 1
+                time.sleep(wait_seconds)
+                continue
 
             if response.status_code != 200:
                 raise GitHubAPIError(
@@ -249,3 +327,37 @@ class GitHubClient:
             page += 1
 
         return items
+
+    @staticmethod
+    def _is_rate_limit_response(response: "requests.Response") -> bool:
+        """Detect a GitHub rate-limit 403 (vs. other 403 causes like a
+        private/missing repo) by inspecting headers/body rather than
+        assuming every 403 is a rate limit."""
+        if response.headers.get("X-RateLimit-Remaining") == "0":
+            return True
+        try:
+            message = response.json().get("message", "")
+        except Exception:
+            message = response.text
+        return "rate limit" in message.lower()
+
+    @staticmethod
+    def _rate_limit_wait_seconds(response: "requests.Response") -> float:
+        """Compute how long to sleep before retrying a rate-limited request."""
+        retry_after = response.headers.get("Retry-After")
+        if retry_after:
+            try:
+                return max(float(retry_after), 1.0) + 1.0
+            except ValueError:
+                pass
+
+        reset_header = response.headers.get("X-RateLimit-Reset")
+        if reset_header:
+            try:
+                reset_epoch = float(reset_header)
+                return max(reset_epoch - time.time(), 1.0) + 1.0
+            except ValueError:
+                pass
+
+        # No usable header: GitHub's search rate limit window is 60s.
+        return 60.0

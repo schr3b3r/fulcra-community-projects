@@ -71,3 +71,35 @@ def test_real_github_client_contributions_and_search():
     issues = client.fetch_issues("fulcradynamics/agent-skills", "2026-06-01", "2026-07-01")
     assert len(issues) > 0
     assert "title" in issues[0]
+
+
+def test_contributions_collection_rejects_spans_over_one_year():
+    """Empirically confirmed (Milestone 3): GitHub's GraphQL API rejects a
+    contributionsCollection 'from'/'to' span exceeding 1 year, with a real
+    VALIDATION error -- not just a documentation claim. enumerate_repositories
+    must chunk into <=1-year windows to work across a ~3-year span."""
+    token, username = get_test_credentials()
+    if not token:
+        pytest.skip("No GitHub token available for live API test.")
+
+    client = GitHubClient(token=token, username=username)
+
+    with pytest.raises(GitHubAPIError, match="must not exceed 1 year"):
+        client.get_contributions_collection("2022-01-01", "2026-01-01")
+
+
+def test_enumerate_repositories_multi_year_span_real():
+    """Real, multi-year (>1 year) enumeration -- must internally chunk into
+    <=1-year contributionsCollection queries and merge results, per
+    Milestone 3's empirical GitHub API constraint discovery."""
+    token, username = get_test_credentials()
+    if not token:
+        pytest.skip("No GitHub token available for live API test.")
+
+    client = GitHubClient(token=token, username=username)
+
+    repos = client.enumerate_repositories("2024-01-01", "2026-07-01")
+    assert isinstance(repos, list)
+    assert repos == sorted(repos)
+    assert len(set(repos)) == len(repos)  # no duplicates across window boundary
+    assert "fulcradynamics/agent-skills" in repos

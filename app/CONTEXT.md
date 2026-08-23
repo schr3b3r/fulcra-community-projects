@@ -29,12 +29,12 @@ a markdown file.
 (See `architecture.md` at the repo root for the full architecture writeup this summary was excerpted from.)
 
 ## Current State
-Milestones 1 (resumable backfill checkpoint) and 2 (real GitHub
-ingestion) are DONE — see `checkpoint.py`, `github_client.py`,
-`github_activity.py`, and `app/features/`. Milestone 3 (full 3-year
-backfill across all repos, with the real kill/restart demo at scale) is
-next. See `plan.md` (at the repo root) for the full intended build
-sequence.
+Milestones 1 (resumable backfill checkpoint), 2 (real GitHub ingestion),
+and 3 (full 3-year backfill chunking + real at-scale resumability) are
+DONE — see `checkpoint.py`, `github_client.py`, `github_activity.py`,
+and `app/features/`. Milestone 4 (rollup layer, day/week for recent 90
+days) is next. See `plan.md` (at the repo root) for the full intended
+build sequence.
 
 ## Fulcra SDK usage notes (verified against the real API, not assumed)
 These are exact, tested call shapes for the `fulcra-api` SDK calls this
@@ -112,6 +112,50 @@ yet started. Consult both, but don't duplicate one into the other.
 (Newest at the top. One entry per meaningful decision — not a full
 chronological journal, just high-signal architectural notes.)
 
+- **(Milestone 3 complete)** `GitHubClient.enumerate_repositories`
+  (chunks a full date window into <=1-year GraphQL queries — empirically
+  required: a real `contributionsCollection` call spanning >1 year
+  returns a real GraphQL VALIDATION error, "The total time spanned by
+  'from' and 'to' must not exceed 1 year"; confirmed live, not assumed
+  from docs), `generate_period_chunks` (weekly for the most recent 90
+  days, monthly older, per Interview decision #1), `build_backfill_work_items`
+  (repo x period-chunk work-item list, chronological by period then
+  alphabetical by repo), and `backfill_full_github_activity` (wires all
+  of the above into Milestone 1's unchanged `process_with_checkpoint`)
+  added in `github_activity.py`/`github_client.py`. Milestone 2's
+  per-item fetch/store logic was factored out into
+  `_ingest_single_item_activity` so both `ingest_github_activity` (single
+  window) and `backfill_full_github_activity` (full multi-period backfill)
+  share it rather than duplicating it.
+  **Real numbers observed:** enumerating repos across a real ~3-year
+  window (schr3b3r, 2023-08-23 to 2026-08-23) took ~0.7s and found 8
+  repos; that window chunks into 47 period chunks / 376 total work items
+  at current chunking parameters. The real interrupt-and-resume demo (2
+  repos x 15 period chunks = 30 work items, spanning both monthly and
+  weekly granularity, interrupted at index 5 via `interrupt_at_index`
+  then resumed via a genuinely separate call) completed all 30 items
+  correctly (`resumed_from_index == 5`, `completed_items_count ==
+  total_items == 30`) in 137s of real wall-clock time across both calls.
+  Naively extrapolating per-item cost (137s / 30 items ≈ 4.6s/item,
+  dominated by GitHub Search API rate-limit backoff sleeps, not raw
+  request latency) to the full 376-item/8-repo/3-year case suggests
+  roughly 25-30 minutes of real wall-clock time for a genuinely complete
+  3-year backfill of this account — a real, if rough, answer to
+  Architecture risk #2, replacing the pre-build guess. This is
+  backoff-dominated, not fetch-dominated: see the rate-limit fix below.
+  **Real bug found and fixed via this demo itself:** GitHub's REST
+  Search API has a much stricter rate limit (30 req/min authenticated)
+  than the core REST API. 3 search calls per work item (commits, PRs,
+  issues) across tens of items in quick succession hit a real 403 rate
+  limit response partway through the first resumability demo run.
+  Fixed in `GitHubClient._paginate_search`: detect a rate-limit 403
+  specifically (via `X-RateLimit-Remaining: 0` or a "rate limit" message,
+  not just any 403 — a private/missing repo can also 403 and should NOT
+  be retried the same way) and back off using `Retry-After` or
+  `X-RateLimit-Reset` if present, falling back to a flat 60s, up to 5
+  retries, rather than failing the whole backfill on an expected,
+  transient condition. This was found and fixed by actually running the
+  real demo, not anticipated speculatively beforehand.
 - **(Milestone 2 complete)** `GitHubClient` (github_client.py) built
   against real GitHub REST/GraphQL APIs via `requests` directly —
   accepts token+username as constructor args or `GITHUB_TOKEN`/
