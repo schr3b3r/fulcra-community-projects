@@ -1,7 +1,8 @@
 """Fulcra-backed durable progress checkpointing for GitHub activity backfills.
 
 This module implements the `GitHubBackfillProgress` record type and functions
-to read/write backfill progress to Fulcra as `MomentAnnotation` records.
+to read/write backfill progress to Fulcra as `MomentAnnotation` records tagged with
+custom Fulcra data type source IDs.
 This ensures resumability across process restarts or failures without
 re-processing previously completed work or skipping items.
 """
@@ -14,6 +15,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 
 from fulcra_api.core import FulcraAPI
 from fulcra_client import get_fulcra_client
+from fulcra_types import get_custom_source_tag
 
 RECORD_TYPE = "GitHubBackfillProgress"
 
@@ -96,12 +98,15 @@ class GitHubBackfillProgress:
             id=record_id,
         )
 
-    def to_fulcra_record(self) -> Dict[str, Any]:
+    def to_fulcra_record(self, source_tag: Optional[str] = None) -> Dict[str, Any]:
         """Format the progress data into a Fulcra MomentAnnotation record dict."""
-        return {
+        rec = {
             "recorded_at": self.updated_at,
             "note": json.dumps(self.to_dict()),
         }
+        if source_tag:
+            rec["sources"] = [source_tag]
+        return rec
 
 
 def write_checkpoint(
@@ -119,8 +124,9 @@ def write_checkpoint(
     if client is None:
         client = get_fulcra_client()
 
+    source_tag = get_custom_source_tag(RECORD_TYPE, client=client)
     progress.updated_at = datetime.now(timezone.utc).isoformat()
-    record = progress.to_fulcra_record()
+    record = progress.to_fulcra_record(source_tag=source_tag)
 
     try:
         client.record_data_type(
@@ -135,6 +141,40 @@ def write_checkpoint(
     _IN_MEMORY_CHECKPOINTS[progress.task_id] = progress
 
     return progress
+
+
+def _fetch_annotations_merged(
+    client: FulcraAPI,
+    record_type_name: str,
+    start_iso: str,
+    end_iso: str,
+) -> List[Dict[str, Any]]:
+    """Helper to query Fulcra using custom type source tag first, merging with untagged records for backward compatibility."""
+    source_tag = get_custom_source_tag(record_type_name, client=client)
+    try:
+        annotations_tagged = client.moment_annotations(
+            start_iso, end_iso, source=source_tag
+        )
+    except Exception:
+        annotations_tagged = []
+
+    try:
+        annotations_all = client.moment_annotations(start_iso, end_iso)
+    except Exception as exc:
+        if not annotations_tagged:
+            raise exc
+        annotations_all = []
+
+    by_id: Dict[str, Dict[str, Any]] = {}
+    for ann in annotations_tagged:
+        if isinstance(ann, dict) and "id" in ann:
+            by_id[ann["id"]] = ann
+
+    for ann in annotations_all:
+        if isinstance(ann, dict) and "id" in ann and ann["id"] not in by_id:
+            by_id[ann["id"]] = ann
+
+    return list(by_id.values())
 
 
 def read_checkpoint(
@@ -181,7 +221,9 @@ def read_checkpoint(
 
     while True:
         try:
-            annotations = client.moment_annotations(start_iso, end_iso)
+            annotations = _fetch_annotations_merged(
+                client, RECORD_TYPE, start_iso, end_iso
+            )
         except Exception as exc:
             raise CheckpointError(
                 f"Failed to query checkpoints from Fulcra: {exc}"
@@ -272,7 +314,9 @@ def list_checkpoints(
         if use_cache:
             latest_by_task.update(_IN_MEMORY_CHECKPOINTS)
 
-        annotations = client.moment_annotations(start_iso, end_iso)
+        annotations = _fetch_annotations_merged(
+            client, RECORD_TYPE, start_iso, end_iso
+        )
 
         for ann in annotations:
             note_str = ann.get("note")
@@ -333,7 +377,7 @@ def clear_checkpoint(
     )
     end_iso = end_time.isoformat() if isinstance(end_time, datetime) else end_time
 
-    annotations = client.moment_annotations(start_iso, end_iso)
+    annotations = _fetch_annotations_merged(client, RECORD_TYPE, start_iso, end_iso)
     tombstones = []
 
     for ann in annotations:

@@ -2,7 +2,7 @@
 
 Computes day, week, month, quarter, and year activity rollups from raw GitHub activity records
 and lower-layer rollups, generating structured volume stats, LLM narrative summaries,
-and explicit provenance chains stored durably in Fulcra.
+and explicit provenance chains stored durably in Fulcra as custom data types.
 """
 
 import calendar
@@ -15,7 +15,8 @@ from typing import Any, Callable, Dict, List, Optional, Union
 
 from fulcra_api.core import FulcraAPI
 from fulcra_client import get_fulcra_client
-from checkpoint import process_with_checkpoint
+from fulcra_types import get_custom_source_tag
+from checkpoint import process_with_checkpoint, _fetch_annotations_merged
 from github_activity import GitHubActivityRaw, read_raw_activities
 
 ROLLUP_RECORD_TYPE = "ActivityRollup"
@@ -76,12 +77,15 @@ class ActivityRollup:
             id=record_id,
         )
 
-    def to_fulcra_record(self) -> Dict[str, Any]:
+    def to_fulcra_record(self, source_tag: Optional[str] = None) -> Dict[str, Any]:
         """Format into a Fulcra MomentAnnotation record dict."""
-        return {
+        rec = {
             "recorded_at": self.updated_at or datetime.now(timezone.utc).isoformat(),
             "note": json.dumps(self.to_dict()),
         }
+        if source_tag:
+            rec["sources"] = [source_tag]
+        return rec
 
 
 def write_rollups(
@@ -103,12 +107,13 @@ def write_rollups(
     if client is None:
         client = get_fulcra_client()
 
+    source_tag = get_custom_source_tag(ROLLUP_RECORD_TYPE, client=client)
     now_iso = datetime.now(timezone.utc).isoformat()
     records = []
     for r in rollups:
         if not r.updated_at:
             r.updated_at = now_iso
-        records.append(r.to_fulcra_record())
+        records.append(r.to_fulcra_record(source_tag=source_tag))
 
     batch_size = 50
     for i in range(0, len(records), batch_size):
@@ -183,7 +188,9 @@ def read_rollups(
 
     while True:
         try:
-            annotations = client.moment_annotations(start_iso, end_iso)
+            annotations = _fetch_annotations_merged(
+                client, ROLLUP_RECORD_TYPE, start_iso, end_iso
+            )
         except Exception as exc:
             raise RollupStoreError(
                 f"Failed to query rollups from Fulcra: {exc}"
@@ -257,7 +264,7 @@ def clear_rollups(
     )
     end_iso = end_time.isoformat() if isinstance(end_time, datetime) else end_time
 
-    annotations = client.moment_annotations(start_iso, end_iso)
+    annotations = _fetch_annotations_merged(client, ROLLUP_RECORD_TYPE, start_iso, end_iso)
     tombstones = []
 
     for ann in annotations:
