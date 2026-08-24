@@ -11,7 +11,24 @@ from datetime import datetime, timedelta, timezone
 import logging
 import os
 import sys
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+# rollup.py / narrative.py do a deferred `from harness.providers.gemini
+# import call_model` (harness/ lives at the REPO ROOT, one level above
+# this file's own app/ directory). Running this file directly as a
+# script (`python app/engineering_journey.py ...`, exactly the documented
+# invocation in SKILL.md/README.md) puts THIS file's own directory
+# (app/) on sys.path, not the repo root -- so that import fails with
+# "ModuleNotFoundError: No module named 'harness'" unless the repo root
+# is separately on PYTHONPATH or `harness` was pip-installed as a
+# package (`pip install -e .` at the repo root; `pip install -r
+# requirements.txt` alone does NOT do this). Fixing it here, once, means
+# the documented command works regardless of how the venv was set up --
+# don't rely on the caller getting PYTHONPATH/install order right.
+_REPO_ROOT = str(Path(__file__).resolve().parent.parent)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
 from dotenv import load_dotenv
 
