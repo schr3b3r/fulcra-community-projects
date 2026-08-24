@@ -21,3 +21,4 @@ Extends the rollup layer with monthly rollups for history older than 90 days (co
 ## Notes
 - Month rollups skip the weekly layer for history older than 90 days per Interview decision #1.
 - Quarter and year rollups form the uniform top of the rollup pyramid, built on top of weekly rollups for recent history and monthly rollups for older history.
+- `generate_layer_rollup`'s `child_period_types` defaults to `["week", "month"]`, deliberately excluding `"day"` -- `generate_day_week_rollups` (Milestone 4) always writes both a day AND a week `ActivityRollup` covering the same dates, so a naive "aggregate every rollup I find" would double-count that activity. Found and fixed after the initial task run (which only tested the month-child path, not the day+week overlap case) -- see the regression test and CONTEXT.md's Decisions Log.

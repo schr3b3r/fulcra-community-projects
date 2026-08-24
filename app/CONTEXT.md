@@ -125,6 +125,17 @@ chronological journal, just high-signal architectural notes.)
   child `ActivityRollup` record IDs in `source_record_ids` to maintain full provenance
   down to raw activity. Integrated into `checkpoint.process_with_checkpoint` for full
   resumability. Verified on real data in Fulcra and fully tested in `tests/test_rollup.py`.
+  **Real bug found and fixed post-task-run:** `generate_layer_rollup`'s
+  `child_period_types` filter had no default, so a quarter/year rollup
+  built from `read_rollups()` (which returns every stored rollup
+  regardless of period_type) would aggregate BOTH the "day" and "week"
+  rollups Milestone 4's `generate_day_week_rollups` always produces for
+  the same underlying dates — double-counting that activity's stats.
+  Fixed by defaulting `child_period_types` to `["week", "month"]`
+  (excluding "day"), with a regression test
+  (`test_generate_layer_rollup_excludes_day_by_default_to_avoid_double_count`)
+  proving a day+week pair covering identical activity is counted once,
+  not twice, by default.
 - **(Milestone 4 complete)** `ActivityRollup` Fulcra record type +
   `write_rollup(s)`/`read_rollups`/`clear_rollups` (same
   `MomentAnnotation`-based pattern as prior record types) added in the

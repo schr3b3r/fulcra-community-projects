@@ -479,11 +479,23 @@ def generate_layer_rollup(
         child_rollups: Optional pre-fetched lower-layer rollups. If None, queries Fulcra.
         client: Optional authenticated FulcraAPI client.
         llm_callable: Optional LLM model function (defaults to harness.providers.gemini.call_model).
-        child_period_types: Optional list of acceptable child period types (e.g. ["week"] or ["month"]).
+        child_period_types: List of acceptable child period types to aggregate
+            from. Defaults to ["week", "month"] -- NOT "day": since
+            generate_day_week_rollups always produces both a day AND a week
+            rollup for every date in the recent-90-day window (see
+            Milestone 4), including "day" here as well as "week" would
+            double-count the same underlying activity. Pass an explicit
+            list (e.g. ["week"] or ["month"]) to restrict further, e.g.
+            when aggregating only the recent (week-based) or only the
+            older (month-based) portion of a period that spans the
+            90-day boundary.
 
     Returns:
         Generated ActivityRollup instance.
     """
+    if child_period_types is None:
+        child_period_types = ["week", "month"]
+
     start_dt = _parse_iso_date(start_date)
     end_dt_parsed = _parse_iso_date(end_date)
     end_dt = datetime(
@@ -1052,7 +1064,11 @@ def generate_layer_rollups(
         llm_callable: Optional custom LLM function.
         use_cache: Whether to use local memory cache for checkpoints.
         child_rollups: Optional pre-fetched lower-layer rollups.
-        child_period_types: Optional list of acceptable child period types.
+        child_period_types: List of acceptable child period types to
+            aggregate from -- see generate_layer_rollup's docstring.
+            Defaults to ["week", "month"] (excludes "day" to avoid
+            double-counting against week rollups covering the same
+            dates).
 
     Returns:
         Summary dict of execution.

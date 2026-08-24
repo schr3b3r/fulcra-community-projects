@@ -326,6 +326,73 @@ def test_generate_layer_rollup_aggregation_and_provenance():
     assert "audio backend and frontend" in quarter_rollup.summary.lower()
 
 
+def test_generate_layer_rollup_excludes_day_by_default_to_avoid_double_count():
+    """generate_day_week_rollups (Milestone 4) always produces BOTH a day
+    AND a week ActivityRollup covering the same underlying activity for
+    every date in the recent-90-day window. A layer rollup that naively
+    aggregated every child period_type it saw would double-count that
+    activity (once via 'day', once via 'week'). child_period_types must
+    default to something that excludes 'day' so this doesn't happen
+    silently."""
+    test_user = f"user_{uuid.uuid4().hex[:6]}"
+
+    day_rollup = ActivityRollup(
+        period_type="day",
+        start_date="2026-08-20",
+        end_date="2026-08-20",
+        username=test_user,
+        summary="Day summary.",
+        stats={
+            "commit_count": 5,
+            "pr_count": 1,
+            "issue_count": 0,
+            "comment_count": 0,
+            "total_activities": 6,
+            "repos_touched": ["org/repo"],
+        },
+        source_record_ids=["raw_1"],
+        id="rec_day_1",
+    )
+    week_rollup = ActivityRollup(
+        period_type="week",
+        start_date="2026-08-17",
+        end_date="2026-08-23",
+        username=test_user,
+        summary="Week summary (covers the same activity as the day above).",
+        stats={
+            "commit_count": 5,
+            "pr_count": 1,
+            "issue_count": 0,
+            "comment_count": 0,
+            "total_activities": 6,
+            "repos_touched": ["org/repo"],
+        },
+        source_record_ids=["raw_1"],
+        id="rec_week_1",
+    )
+
+    def mock_llm_callable(messages, system_prompt=""):
+        class MockResp:
+            text = f"Quarter synthesis for {test_user}."
+
+        return MockResp()
+
+    quarter_rollup = generate_layer_rollup(
+        username=test_user,
+        period_type="quarter",
+        start_date="2026-07-01",
+        end_date="2026-09-30",
+        child_rollups=[day_rollup, week_rollup],
+        llm_callable=mock_llm_callable,
+    )
+
+    # Only the week rollup should be counted -- the day rollup covers the
+    # exact same activity and must be excluded by the default filter.
+    assert quarter_rollup.stats["commit_count"] == 5
+    assert quarter_rollup.stats["total_activities"] == 6
+    assert quarter_rollup.source_record_ids == ["rec_week_1"]
+
+
 def test_resumable_day_week_rollup_generation(monkeypatch):
     client = get_fulcra_client()
     test_user = f"testuser_{uuid.uuid4().hex[:6]}"
