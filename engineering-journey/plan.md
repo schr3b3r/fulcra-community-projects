@@ -112,6 +112,22 @@ already-written records (plain `MomentAnnotation`, no source tag)
 should remain readable for backward compatibility during the
 transition, not silently orphaned.
 
+## Milestone 10: Fix private repo discovery
+Corrected scope after independently re-verifying the original live-test
+report against 3 real private repos in a real account (see
+`app/CONTEXT.md`'s Decisions Log for the full re-verification writeup):
+the actual confirmed gap is that `GitHubClient.enumerate_repositories()`
+relies entirely on GraphQL `contributionsCollection`, which genuinely
+misses real private repos with real contributions -- NOT that the REST
+Search API can't see private repo content (confirmed directly that it
+can, for both commits and issues, given a normal `repo`-scoped PAT).
+Fix: add an explicit `GET /user/repos?affiliation=owner,collaborator,
+organization_member` listing pass, unioned with `contributionsCollection`'s
+results, filtered to repos whose `pushed_at` falls in the requested
+window. This is the single change needed so a real account's private
+work is actually discovered and backfilled -- no rewrite of the
+fetch layer, since it already works correctly once repos are found.
+
 ## Deferred / explicitly out of scope for this Plan
 Everything under "Explicitly NOT in scope for v1" in the Intake brief
 (web app, hosting, video/interactive output, ongoing digest delivery,
@@ -119,21 +135,10 @@ org-wide analysis, smart incremental re-runs) stays deferred — not
 represented as milestones here, and not to be picked up opportunistically
 mid-build without deliberately revisiting scope first.
 
-Two further real gaps surfaced by the first live fresh-account test
-(tracked, not yet scoped as milestones here — pick up deliberately, not
-opportunistically):
-- **Private repo activity is currently invisible.** GitHub's Search API
-  (which all raw commit/PR/issue fetching depends on) cannot see private
-  repos at all, regardless of token scope — confirmed via direct GraphQL
-  probing showing thousands of real "restricted" contributions in a
-  period the tool reported as completely silent. Fixing this means
-  moving raw-activity fetch off the Search API onto per-repo REST/GraphQL
-  endpoints plus an explicit repo-listing discovery pass (see
-  `app/CONTEXT.md`'s Decisions Log for the full writeup) — a real
-  architecture change, not a quick patch, and out of this Plan's scope
-  until deliberately picked up as its own milestone.
-- **GitHub auth device-code flow** was added to `SKILL.md` (see recent
-  Decisions Log entries) but its actual smoothness in practice on a
-  genuinely fresh machine is still only doc-reviewed, not yet
-  live-verified end to end.
+One further real gap surfaced by the first live fresh-account test
+(tracked, not yet scoped as a milestone here — pick up deliberately, not
+opportunistically): the GitHub auth device-code flow was added to
+`SKILL.md` (see Decisions Log) but its actual smoothness in practice on
+a genuinely fresh machine is still only doc-reviewed, not yet
+live-verified end to end.
 
