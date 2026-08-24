@@ -351,3 +351,88 @@ def test_full_backfill_multi_repo_multi_period_resumability_real(monkeypatch):
         for repo in repos:
             clear_raw_activities(username=username, repo_name=repo, client=client)
 
+
+def test_backfill_delta_awareness_real():
+    """Milestone 11's live integration test:
+    1. Perform a narrow backfill for a single repo and complete it.
+    2. Perform a second backfill with an expanded repo set (including a new repo).
+    3. Assert the second call detects the new repo, runs a delta backfill,
+       ingests activity for the new repo, and does NOT duplicate activity
+       for the original repo."""
+    token, username = get_test_credentials()
+    if not token:
+        pytest.skip("No GitHub token available for live API test.")
+
+    client = get_fulcra_client()
+    gh_client = GitHubClient(token=token, username=username)
+
+    test_task_id = f"test_delta_{uuid.uuid4().hex[:8]}"
+    narrow_repos = ["fulcradynamics/agent-skills"]
+    expanded_repos = ["fulcradynamics/agent-skills", "schr3b3r/shimmer"]
+    start_date = "2026-06-01"
+    end_date = "2026-06-15"
+    query_start = "2026-05-31"
+    query_end = "2026-06-16"
+
+    delta_task_id = None
+    try:
+        # Pass 1: narrow backfill
+        res1 = backfill_full_github_activity(
+            gh_client=gh_client,
+            start_date=start_date,
+            end_date=end_date,
+            repo_names=narrow_repos,
+            client=client,
+            task_id=test_task_id,
+        )
+        assert res1["status"] == "completed"
+        assert res1["is_delta"] is False
+
+        # Query raw activities count for original repo after Pass 1
+        records_before = read_raw_activities(
+            username=username,
+            repo_name="fulcradynamics/agent-skills",
+            start_time=query_start,
+            end_time=query_end,
+            client=client,
+        )
+        count_before = len(records_before)
+
+        # Pass 2: expanded backfill (adding new repo)
+        res2 = backfill_full_github_activity(
+            gh_client=gh_client,
+            start_date=start_date,
+            end_date=end_date,
+            repo_names=expanded_repos,
+            client=client,
+            task_id=test_task_id,
+        )
+        assert res2["status"] == "completed"
+        assert res2["is_delta"] is True
+        assert res2["new_repos"] == ["schr3b3r/shimmer"]
+        delta_task_id = res2.get("delta_task_id")
+
+        # Query raw activities count for original repo after Pass 2
+        records_after = read_raw_activities(
+            username=username,
+            repo_name="fulcradynamics/agent-skills",
+            start_time=query_start,
+            end_time=query_end,
+            client=client,
+        )
+        count_after = len(records_after)
+
+        # Confirm count for original repo has NOT duplicated
+        assert count_after == count_before
+
+    finally:
+        clear_checkpoint(test_task_id, client=client)
+        if delta_task_id:
+            clear_checkpoint(delta_task_id, client=client)
+        clear_raw_activities(
+            username=username,
+            repo_name="schr3b3r/shimmer",
+            start_time=query_start,
+            end_time=query_end,
+            client=client,
+        )

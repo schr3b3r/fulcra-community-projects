@@ -128,6 +128,29 @@ window. This is the single change needed so a real account's private
 work is actually discovered and backfilled -- no rewrite of the
 fetch layer, since it already works correctly once repos are found.
 
+## Milestone 11: Fix stale checkpoints masking improved discovery
+A second real fresh-account test (GitHub user with ~90+ private repos)
+found that Milestone 10's private-repo discovery fix, while correct in
+isolation, is unreachable via the documented `backfill` CLI path in
+practice: `backfill_full_github_activity`'s checkpoint `task_id`
+depends only on username + date range, never on which repos were
+actually discovered, so a `"completed"` checkpoint from an EARLIER,
+narrower backfill (e.g. run before Milestone 10's fix, or before the
+user had access to new repos) silently short-circuits every later
+backfill attempt for the same username+range -- even one using improved
+discovery logic -- with no warning that the "completed" result only
+ever covered a fraction of the real repo set. Since `write_raw_activities`
+has no deduplication, the fix must be delta-aware, not a blind
+reprocess: store the actual discovered repo list (not just a count) in
+checkpoint metadata, detect when a fresh discovery finds repos the old
+checkpoint didn't cover, and run a distinctly-tracked delta backfill for
+only those new repos -- never reprocessing repos already covered. See
+`app/CONTEXT.md`'s Decisions Log for the full diagnosis and planned fix
+direction. Add a real live integration test exercising this exact
+"stale narrower checkpoint, then expanded real repo set" scenario end
+to end, not just a unit test of `enumerate_repositories()` in isolation
+(which already passed and didn't catch this).
+
 ## Deferred / explicitly out of scope for this Plan
 Everything under "Explicitly NOT in scope for v1" in the Intake brief
 (web app, hosting, video/interactive output, ongoing digest delivery,
