@@ -8,7 +8,8 @@ from typing import Any, Dict, List, Optional, Union
 
 from fulcra_api.core import FulcraAPI
 from fulcra_client import get_fulcra_client
-from checkpoint import process_with_checkpoint
+from fulcra_types import get_custom_source_tag
+from checkpoint import process_with_checkpoint, _fetch_annotations_merged
 from github_client import GitHubClient
 
 RAW_RECORD_TYPE = "GitHubActivityRaw"
@@ -73,12 +74,15 @@ class GitHubActivityRaw:
             id=record_id,
         )
 
-    def to_fulcra_record(self) -> Dict[str, Any]:
+    def to_fulcra_record(self, source_tag: Optional[str] = None) -> Dict[str, Any]:
         """Format into a Fulcra MomentAnnotation record dict."""
-        return {
+        rec = {
             "recorded_at": self.updated_at or self.timestamp,
             "note": json.dumps(self.to_dict()),
         }
+        if source_tag:
+            rec["sources"] = [source_tag]
+        return rec
 
 
 def write_raw_activities(
@@ -100,12 +104,13 @@ def write_raw_activities(
     if client is None:
         client = get_fulcra_client()
 
+    source_tag = get_custom_source_tag(RAW_RECORD_TYPE, client=client)
     now_iso = datetime.now(timezone.utc).isoformat()
     records = []
     for act in activities:
         if not act.updated_at:
             act.updated_at = now_iso
-        records.append(act.to_fulcra_record())
+        records.append(act.to_fulcra_record(source_tag=source_tag))
 
     # Batch write in chunks of 50
     batch_size = 50
@@ -169,7 +174,9 @@ def read_raw_activities(
 
     while True:
         try:
-            annotations = client.moment_annotations(start_iso, end_iso)
+            annotations = _fetch_annotations_merged(
+                client, RAW_RECORD_TYPE, start_iso, end_iso
+            )
         except Exception as exc:
             raise ActivityStoreError(
                 f"Failed to query activities from Fulcra: {exc}"
@@ -236,7 +243,7 @@ def clear_raw_activities(
     )
     end_iso = end_time.isoformat() if isinstance(end_time, datetime) else end_time
 
-    annotations = client.moment_annotations(start_iso, end_iso)
+    annotations = _fetch_annotations_merged(client, RAW_RECORD_TYPE, start_iso, end_iso)
     tombstones = []
 
     for ann in annotations:

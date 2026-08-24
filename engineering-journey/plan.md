@@ -93,9 +93,47 @@ backfill," "generate journey from already-ingested data" as a separate,
 faster re-runnable step per Architecture's Context-Compute Separation
 point), and a README a stranger could follow.
 
+## Milestone 9: Migrate to real custom Fulcra data types
+Added after real fresh-account test feedback surfaced that every
+persistence path in this codebase (raw activity, rollups, notability
+signals, backfill checkpoints) writes to the generic built-in
+`MomentAnnotation` type, with the actual semantic type hidden as a
+`"record_type"` string key inside the JSON `note` blob — not a real,
+registered Fulcra data type. This directly contradicts this project's
+own "why Fulcra, specifically" rationale in `intake/brief.md` (custom
+annotation types as a deliberate, visible primitive). Create one real
+custom data type per record kind (`GitHubBackfillProgress`,
+`GitHubActivityRaw`, `ActivityRollup`, `NotabilitySignal`), and change
+every write/read function to use the confirmed real mechanism (see
+`app/CONTEXT.md`'s "Custom annotation data types" SDK usage note) —
+write to the base type with a `sources` tag identifying the custom
+type's UUID, read back filtered by that same `source`. Existing
+already-written records (plain `MomentAnnotation`, no source tag)
+should remain readable for backward compatibility during the
+transition, not silently orphaned.
+
 ## Deferred / explicitly out of scope for this Plan
 Everything under "Explicitly NOT in scope for v1" in the Intake brief
 (web app, hosting, video/interactive output, ongoing digest delivery,
 org-wide analysis, smart incremental re-runs) stays deferred — not
 represented as milestones here, and not to be picked up opportunistically
 mid-build without deliberately revisiting scope first.
+
+Two further real gaps surfaced by the first live fresh-account test
+(tracked, not yet scoped as milestones here — pick up deliberately, not
+opportunistically):
+- **Private repo activity is currently invisible.** GitHub's Search API
+  (which all raw commit/PR/issue fetching depends on) cannot see private
+  repos at all, regardless of token scope — confirmed via direct GraphQL
+  probing showing thousands of real "restricted" contributions in a
+  period the tool reported as completely silent. Fixing this means
+  moving raw-activity fetch off the Search API onto per-repo REST/GraphQL
+  endpoints plus an explicit repo-listing discovery pass (see
+  `app/CONTEXT.md`'s Decisions Log for the full writeup) — a real
+  architecture change, not a quick patch, and out of this Plan's scope
+  until deliberately picked up as its own milestone.
+- **GitHub auth device-code flow** was added to `SKILL.md` (see recent
+  Decisions Log entries) but its actual smoothness in practice on a
+  genuinely fresh machine is still only doc-reviewed, not yet
+  live-verified end to end.
+
