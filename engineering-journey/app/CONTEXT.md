@@ -29,7 +29,7 @@ a markdown file.
 (See `architecture.md` at the repo root for the full architecture writeup this summary was excerpted from.)
 
 ## Current State
-All Milestones 1–8 are DONE:
+All Milestones 1–9 are DONE:
 - Milestone 1: Resumable backfill checkpoint (`checkpoint.py`)
 - Milestone 2: Real GitHub raw activity ingestion (`github_client.py`, `github_activity.py`)
 - Milestone 3: Full 3-year backfill chunking + real at-scale resumability (`github_activity.py`)
@@ -38,8 +38,13 @@ All Milestones 1–8 are DONE:
 - Milestone 6: Personal baseline notability signal scoring (`notability.py`)
 - Milestone 7: Narrative synthesis & Markdown production (`narrative.py`)
 - Milestone 8: Packaging as an installable Hermes skill (`engineering_journey.py`, `SKILL.md`, `README.md`, `requirements.txt`)
+- Milestone 9: Migrated all record kinds to real, visible custom Fulcra data types (`fulcra_types.py`)
 
 The project is fully packaged, tested, and ready for execution by fresh agents or human users.
+Real gaps remain open and deliberately deferred — see `plan.md`'s
+"Deferred / explicitly out of scope" section (private-repo activity
+invisibility being the most significant one; not yet scoped as its own
+milestone).
 
 ## Fulcra SDK usage notes (verified against the real API, not assumed)
 These are exact, tested call shapes for the `fulcra-api` SDK calls this
@@ -92,6 +97,75 @@ the "obvious" call signature from a method name.
   returns the real JSON schema for that data type/version — check this
   BEFORE guessing field names for a `record_data_type` call, rather than
   guessing and iterating against live 400/404 errors.
+- **Custom annotation data types** (needed to fix the "everything is a
+  generic MomentAnnotation" gap flagged post-Milestone-8 — see Decisions
+  Log): a REAL custom data type is created via the CLI/SDK, gets its own
+  UUID, but records for it are NOT written directly to that UUID as a
+  data type name (`record_data_type("MomentAnnotation/<uuid>", ...)`
+  returns a 404 -- confirmed live). The real mechanism, confirmed
+  end-to-end against a real throwaway probe type:
+  1. **Create** the type once (idempotent -- check the catalog first,
+     don't recreate on every run):
+     ```python
+     # No direct SDK method found for creation in fulcra_api.core;
+     # the CLI's `fulcra-api data-type create` is a thin wrapper over
+     # an /data/v1/... POST -- either shell out to the CLI once during
+     # setup, or inspect fulcra_api.cli.data_types.py's create command
+     # for the exact endpoint/payload if a pure-SDK path is wanted.
+     # fulcra-api data-type create <BaseType> <Name> -d "<description>"
+     ```
+     Response includes a real assigned UUID, e.g.
+     `{"id": "ee95f699-...", "name": "ActivityRollup", ...,
+     "fulcra_source_id": "com.fulcradynamics.annotation.ee95f699-..."}`.
+     **Store that returned UUID durably** (e.g. in a small local config/
+     `.env` value per type, resolved once per environment) -- do not
+     recreate the type on every run; check `client.resolve_data_type
+     ("MomentAnnotation/<uuid>")` or `client.v1_catalog(name=...)`
+     first and reuse the existing UUID if the type already exists.
+  2. **Write** a record "as" that custom type by writing to the BASE
+     type (e.g. `"MomentAnnotation"`, unchanged) but adding a `sources`
+     field containing `f"com.fulcradynamics.annotation.{custom_uuid}"`
+     (lowercase UUID) to each record dict:
+     ```python
+     client.record_data_type(
+         "MomentAnnotation",
+         [{
+             "recorded_at": now.isoformat(),
+             "note": json.dumps({...}),
+             "sources": [f"com.fulcradynamics.annotation.{custom_uuid}"],
+         }],
+         api_version="v1alpha1",
+     )
+     ```
+     (Confirmed by reading `fulcra_api.cli.record`'s actual
+     implementation, then reproducing it directly via the SDK -- the CLI
+     resolves `BaseType/UUID` syntax internally but still POSTs to the
+     base type, attaching the custom type's identity via `sources`, not
+     via the data-type path itself.)
+  3. **Read** records back filtered to just that custom type via
+     `client.moment_annotations(start, end, source=f"com.fulcradynamics.annotation.{custom_uuid}")`
+     -- confirmed this returns ONLY records tagged with that source, not
+     every `MomentAnnotation` mixed together, and the returned dict
+     includes a `metadata` field with the full custom-type catalog entry
+     (name, description, created_at, etc.) alongside the record's own
+     fields.
+  This means fixing the "no custom data types" gap is: create one real
+  custom type per record kind (`GitHubActivityRaw`, `ActivityRollup`,
+  `NotabilitySignal`, `GitHubBackfillProgress`) once, store their UUIDs,
+  and change every `write_*`/`read_*` function's `record_data_type`/
+  `moment_annotations` calls to pass the `sources`/`source` value above
+  instead of relying purely on the embedded `"record_type"` JSON string
+  key for identification (the JSON `note` payload and its `record_type`
+  key can stay as-is for backward-compatible reading of already-written
+  records, but new writes should carry the real source tag too).
+  **(Milestone 9, done)** This is now implemented in `fulcra_types.py` +
+  the four modules' write/read/clear functions -- see the Decisions Log
+  entry for real verification details (all four types confirmed live in
+  this account's catalog, idempotent creation confirmed, backward-compat
+  reads confirmed). `get_or_create_custom_data_type` uses
+  `client.create_annotation(annotation_type="moment", name=..., ...)`
+  for creation (a genuine pure-SDK path was found -- no CLI subprocess
+  needed after all).
 - **Known minor gap**: `clear_checkpoint`/`clear_raw_activities` query-
   then-tombstone in one pass immediately after the caller's own writes,
   with no poll/retry (unlike `read_checkpoint`/`list_checkpoints`/
@@ -116,6 +190,62 @@ yet started. Consult both, but don't duplicate one into the other.
 ## Decisions Log
 (Newest at the top. One entry per meaningful decision — not a full
 chronological journal, just high-signal architectural notes.)
+
+- **(Milestone 9 complete)** Migrated all four record kinds
+  (`GitHubBackfillProgress`, `GitHubActivityRaw`, `ActivityRollup`,
+  `NotabilitySignal`) from generic `MomentAnnotation` JSON-note blobs to
+  real, visible custom Fulcra data types, fixing the gap below. New
+  `fulcra_types.py`: `get_or_create_custom_data_type(name)` idempotently
+  creates (via `client.create_annotation`, confirmed a real pure-SDK
+  path exists -- no CLI subprocess needed) or looks up (via
+  `client.v1_catalog`) each type's real UUID; `get_custom_source_tag(name)`
+  returns the `com.fulcradynamics.annotation.<uuid>` tag used to write
+  records "as" that type and filter reads to just that type. Every
+  `write_*` function now adds `sources: [<tag>]` to each record;
+  `checkpoint._fetch_annotations_merged` (shared by all four modules'
+  `read_*`/`clear_*` functions) merges new source-tagged records with
+  legacy untagged ones by record ID, so already-written pre-migration
+  data stays readable rather than being silently orphaned -- confirmed
+  by a real test writing an old-format record directly, a new-format
+  record via `write_checkpoint`, and reading both back correctly.
+  **Real verification performed (not just unit tests):** created all
+  four types for real in this environment's real Fulcra account and
+  confirmed all four are genuinely visible via `fulcra-api catalog -c
+  user_configured` (previously: zero custom types existed, only stock
+  built-ins). Confirmed idempotent creation (second call for an
+  already-existing type returns the same UUID, no duplicate created --
+  checked the real catalog before and after). A stray `_ProbeTypeTest5`
+  type created during the harness's own exploration was found and
+  archived before finishing (yet another instance of the recurring
+  "clean up ad-hoc Fulcra writes" issue -- see the process note below).
+  Full suite: 53/53 pass (48 pre-existing + 5 new in
+  `tests/test_fulcra_types.py`).
+  The task run itself hit the harness's `max_iterations=50` cap after
+  writing the real code/tests/verification but before updating
+  `app/features/INDEX.md`, adding `app/features/09_*.md`, updating this
+  file's Current State, or running `git_commit` -- completed manually:
+  reran the full suite clean, added the doc updates, archived the stray
+  probe type, and committed.
+- **(Real gap found via live test feedback -- now fixed, see Milestone 9
+  entry above)** The first real fresh-account test's shared
+  `ISSUES_AND_LIMITATIONS.md` flagged that NO custom Fulcra data types
+  exist anywhere in this codebase -- every persistence path
+  (`github_activity.py`, `rollup.py`, `notability.py`, `checkpoint.py`)
+  writes to the generic built-in `MomentAnnotation` type with the real
+  semantic type hidden as a `"record_type"` string inside the JSON
+  `note` blob, not a real registered Fulcra data type. This directly
+  contradicts this project's own stated "why Fulcra, specifically"
+  rationale (custom annotation types as a deliberate, visible primitive,
+  per `intake/brief.md`). Confirmed independently by creating a real
+  throwaway custom data type via `fulcra-api data-type create` and
+  round-tripping a real record through it -- see the new "Custom
+  annotation data types" entry in the SDK usage notes above for the
+  full confirmed mechanism (create once -> write to the BASE type with
+  a `sources: ["com.fulcradynamics.annotation.<uuid>"]` tag -> read back
+  via `moment_annotations(..., source="com.fulcradynamics.annotation.<uuid>")`).
+  This is a real migration across every persistence path, not a one-line
+  fix -- scoped as its own milestone (see plan.md) rather than bolted on
+  ad hoc.
 
 - **(Post-Milestone-8 fix)** Real-world feedback from the first actual
   fresh-VM/fresh-agent test of this skill (a different real GitHub
