@@ -16,6 +16,26 @@ class GitHubAPIError(Exception):
     """Exception raised when a GitHub API request fails."""
 
 
+def _parse_datetime(
+    dt_val: Union[datetime, str], is_end_of_day: bool = False
+) -> datetime:
+    """Parse string or datetime into a UTC timezone-aware datetime object."""
+    if isinstance(dt_val, str):
+        dt_str = dt_val.strip()
+        if "T" not in dt_str:
+            if is_end_of_day:
+                dt_str = f"{dt_str}T23:59:59Z"
+            else:
+                dt_str = f"{dt_str}T00:00:00Z"
+        dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
+    else:
+        dt = dt_val
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 class GitHubClient:
     """Client for interacting with GitHub REST and GraphQL APIs."""
 
@@ -62,6 +82,83 @@ class GitHubClient:
         if "T" in dt_str:
             return dt_str
         return f"{dt_str}T00:00:00Z"
+
+    def list_accessible_repositories(
+        self,
+        pushed_after: Optional[Union[datetime, str]] = None,
+        pushed_before: Optional[Union[datetime, str]] = None,
+    ) -> List[str]:
+        """List repositories accessible to the user via GET /user/repos.
+
+        Args:
+            pushed_after: Optional start of pushed_at window.
+            pushed_before: Optional end of pushed_at window.
+
+        Returns:
+            Sorted list of unique repository full names ('owner/repo').
+        """
+        after_dt = (
+            _parse_datetime(pushed_after, is_end_of_day=False)
+            if pushed_after is not None
+            else None
+        )
+        before_dt = (
+            _parse_datetime(pushed_before, is_end_of_day=True)
+            if pushed_before is not None
+            else None
+        )
+
+        repo_set: set[str] = set()
+        page = 1
+        per_page = 100
+
+        while True:
+            try:
+                response = self.session.get(
+                    f"{self.base_url}/user/repos",
+                    params={
+                        "affiliation": "owner,collaborator,organization_member",
+                        "per_page": per_page,
+                        "page": page,
+                    },
+                    timeout=30,
+                )
+            except requests.RequestException as exc:
+                raise GitHubAPIError(f"User repos request failed: {exc}") from exc
+
+            if response.status_code != 200:
+                raise GitHubAPIError(
+                    f"User repos API HTTP {response.status_code}: {response.text}"
+                )
+
+            repos_page = response.json()
+            if not isinstance(repos_page, list):
+                raise GitHubAPIError(
+                    f"User repos API expected list, got {type(repos_page).__name__}"
+                )
+
+            for item in repos_page:
+                full_name = item.get("full_name")
+                if not full_name:
+                    continue
+
+                pushed_at_str = item.get("pushed_at")
+                if after_dt or before_dt:
+                    if not pushed_at_str:
+                        continue
+                    pushed_dt = _parse_datetime(pushed_at_str, is_end_of_day=False)
+                    if after_dt and pushed_dt < after_dt:
+                        continue
+                    if before_dt and pushed_dt > before_dt:
+                        continue
+
+                repo_set.add(full_name)
+
+            if len(repos_page) < per_page:
+                break
+            page += 1
+
+        return sorted(list(repo_set))
 
     def get_contributions_collection(
         self, start_date: str, end_date: str
@@ -191,10 +288,11 @@ class GitHubClient:
         start_date: Optional[Union[datetime, str]] = None,
         end_date: Optional[Union[datetime, str]] = None,
     ) -> List[str]:
-        """Enumerate all repositories contributed to across a date window (e.g. 3 years).
+        """Enumerate all repositories contributed to or accessible across a date window (e.g. 3 years).
 
-        Queries GraphQL contributionsCollection in <= 1-year windows to comply with
-        GitHub API constraints.
+        Queries GraphQL contributionsCollection in <= 1-year windows and unions
+        with GET /user/repos listing (filtered to repos with pushed_at in window)
+        to ensure private repositories missed by contributionsCollection are included.
 
         Args:
             start_date: Start of query window (defaults to 3 years ago).
@@ -206,25 +304,25 @@ class GitHubClient:
         now = datetime.now(timezone.utc)
         if end_date is None:
             end_dt = now
-        elif isinstance(end_date, str):
-            end_dt = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
-            if end_dt.tzinfo is None:
-                end_dt = end_dt.replace(tzinfo=timezone.utc)
         else:
-            end_dt = end_date
+            end_dt = _parse_datetime(end_date, is_end_of_day=True)
 
         if start_date is None:
             start_dt = end_dt - timedelta(days=365 * 3)
-        elif isinstance(start_date, str):
-            start_dt = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
-            if start_dt.tzinfo is None:
-                start_dt = start_dt.replace(tzinfo=timezone.utc)
         else:
-            start_dt = start_date
+            start_dt = _parse_datetime(start_date, is_end_of_day=False)
 
         repo_set = set()
-        curr = start_dt
 
+        # 1. Listing-based discovery for accessible repos (includes private repos)
+        accessible_repos = self.list_accessible_repositories(
+            pushed_after=start_dt,
+            pushed_before=end_dt,
+        )
+        repo_set.update(accessible_repos)
+
+        # 2. GraphQL contributionsCollection discovery across window chunks
+        curr = start_dt
         while curr < end_dt:
             window_end = min(curr + timedelta(days=365), end_dt)
             start_str = curr.strftime("%Y-%m-%d")

@@ -16,6 +16,7 @@ status changes.
 | [07_narrative_generation.md](07_narrative_generation.md) | done | Reads the full rollup + notability layer and synthesizes one paced Markdown journey document with a provenance appendix |
 | [08_packaging_hermes_skill.md](08_packaging_hermes_skill.md) | done | Unified CLI entrypoint, SKILL.md, README.md, requirements.txt, and packaging for execution by fresh agents or humans |
 | [09_custom_fulcra_data_types.md](09_custom_fulcra_data_types.md) | done | Migrated all record kinds from generic MomentAnnotation blobs to real, visible custom Fulcra data types, with backward-compatible reads |
+| [10_private_repo_discovery.md](10_private_repo_discovery.md) | done | Fixed private repo discovery in `enumerate_repositories()` by unioning `GET /user/repos` listing with GraphQL contributions Collection |
 
 ## Status values
 - `not_started` — described but no work done yet.
