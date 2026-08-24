@@ -41,10 +41,9 @@ All Milestones 1–9 are DONE:
 - Milestone 9: Migrated all record kinds to real, visible custom Fulcra data types (`fulcra_types.py`)
 
 The project is fully packaged, tested, and ready for execution by fresh agents or human users.
-Real gaps remain open and deliberately deferred — see `plan.md`'s
-"Deferred / explicitly out of scope" section (private-repo activity
-invisibility being the most significant one; not yet scoped as its own
-milestone).
+Milestone 10 (private repo discovery fix) is next -- see plan.md and the
+Decisions Log entry below for the corrected scope (narrower than
+initially reported).
 
 ## Fulcra SDK usage notes (verified against the real API, not assumed)
 These are exact, tested call shapes for the `fulcra-api` SDK calls this
@@ -190,6 +189,54 @@ yet started. Consult both, but don't duplicate one into the other.
 ## Decisions Log
 (Newest at the top. One entry per meaningful decision — not a full
 chronological journal, just high-signal architectural notes.)
+
+- **(Real gap independently re-verified, scope corrected -- Milestone 10
+  scoped for it)** The same fresh-account live test's
+  `ISSUES_AND_LIMITATIONS.md` (see the Milestone 9-era entry below for
+  full original text) also claimed GitHub's REST Search API "cannot
+  index or return private repository content at all, regardless of
+  token scopes" and that fixing raw-activity fetch would require
+  replacing Search API calls with per-repo REST endpoints everywhere.
+  **Independently re-verified this claim directly against 3 real
+  private repos in this environment's own real GitHub account
+  (`schr3b3r/shimmer`, `schr3b3r/thrum`, `schr3b3r/fulcra-skills-dash`)
+  before accepting it, and it does NOT hold as stated:**
+  - `search/commits` and `search/issues` (a real throwaway issue was
+    created, found via search, then closed) DID successfully find real
+    commits/issues in 2 of the 3 private repos (`shimmer`, `thrum`) with
+    a normal `repo`-scoped PAT -- contradicting "cannot index private
+    content at all, regardless of scope."
+  - The one repo where `search/commits` found zero results
+    (`fulcra-skills-dash`, which has 7 real commits) turned out to be
+    unrelated to privacy: those commits were authored with an email
+    (`schr3b3r@openclaw.local`) not linked to any GitHub account, so
+    `author:` search can't match them by GitHub login regardless of
+    repo visibility -- an author-linking edge case, not a Search API
+    privacy limitation, and one that would equally affect a public repo.
+  - The ACTUAL confirmed gap is narrower and upstream of fetching: this
+    project's `GitHubClient.enumerate_repositories()` (the only
+    repo-discovery mechanism `backfill_full_github_activity` uses)
+    relies entirely on GraphQL `contributionsCollection`, which
+    genuinely DID miss both real private repos with real contributions
+    (`hasAnyRestrictedContributions` was `false`/`0` for a window
+    containing real private commits by this account -- confirmed live).
+    Once a private repo is actually in the `repo_names` list, the
+    existing Search-API-based `fetch_commits`/`fetch_pull_requests`/
+    `fetch_issues` already work for it (per the direct test above) --
+    no rewrite of the fetch layer needed.
+  - Real fix scope: add an explicit `GET /user/repos?affiliation=owner,
+    collaborator,organization_member` listing pass to
+    `enumerate_repositories()`, unioned with whatever
+    `contributionsCollection` already finds, filtered to repos whose
+    `pushed_at` falls within the requested window (a repo not pushed to
+    at all in-window has no in-window activity; a repo pushed to could
+    still have zero activity *by this specific user*, which the
+    existing per-repo fetch functions already correctly filter for via
+    `author:`/`committer-date:` search qualifiers -- so this is a cheap,
+    correct prefilter, not a source of false negatives). This is a
+    single-function fix plus one new GitHubClient method, not the
+    sweeping "replace Search API everywhere" rewrite originally
+    proposed -- confirmed unnecessary before committing to it.
 
 - **(Milestone 9 complete)** Migrated all four record kinds
   (`GitHubBackfillProgress`, `GitHubActivityRaw`, `ActivityRollup`,
