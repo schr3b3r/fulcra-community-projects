@@ -33,9 +33,10 @@ Milestones 1 (resumable backfill checkpoint), 2 (real GitHub ingestion),
 3 (full 3-year backfill chunking + real at-scale resumability), 4
 (day/week rollup layer with real LLM narrative summaries), 5
 (month/quarter/year rollup layer with hierarchical provenance chains),
-and 6 (notability signal) are DONE — see `checkpoint.py`, `github_client.py`,
-`github_activity.py`, `rollup.py`, `notability.py`, and `app/features/`.
-Milestone 7 (narrative synthesis & markdown production) is next.
+6 (notability signal), and 7 (narrative synthesis & markdown production)
+are DONE — see `checkpoint.py`, `github_client.py`, `github_activity.py`,
+`rollup.py`, `notability.py`, `narrative.py`, and `app/features/`.
+Milestone 8 (packaging as an installable Hermes skill) is next.
 See `plan.md` (at the repo root) for the full intended build sequence.
 
 ## Fulcra SDK usage notes (verified against the real API, not assumed)
@@ -114,6 +115,64 @@ yet started. Consult both, but don't duplicate one into the other.
 (Newest at the top. One entry per meaningful decision — not a full
 chronological journal, just high-signal architectural notes.)
 
+- **(Milestone 7 complete)** Built `narrative.py`, the final read +
+  synthesize + write-to-disk pass over the full rollup/notability
+  structure. `build_section_contexts` picks quarter rollups as the
+  chronological backbone when present (falling back to month rollups,
+  then a calendar-month grouping of whatever's available), and attaches
+  each backbone period's child week/day/month rollups + their
+  `NotabilitySignal`s as detail context -- days are dropped from the
+  child list whenever week rollups already cover the same dates, to
+  avoid listing the same activity twice (mirrors Milestone 5's
+  day/week double-count fix, applied at the narrative layer instead of
+  the stats layer). `_synthesize_section_narrative` builds one grounded
+  prompt per backbone section (not per sub-period) containing every
+  child period's real stats/flags/explanation, and instructs the LLM
+  (via `harness.providers.gemini.call_model`, reused as-is) to give
+  notable sub-periods (score >= 0.4 or any of
+  high_volume/new_repo/focus_switch/streak) real multi-paragraph prose
+  and quiet/routine sub-periods a single compressed transition
+  clause -- both in the same document, per Interview decision #3 (gaps
+  are real data, not noise to hide). A separate `_synthesize_overview`
+  call produces a short executive-summary intro grounded in the same
+  per-section stats. A markdown "Appendix: Provenance & Data
+  References" table maps every backbone section back to its top-level
+  rollup ID, max notability score, flags, and (truncated) child rollup
+  IDs, satisfying the provenance requirement without needing a new
+  Fulcra record type -- this pass is read+synthesize+write-a-file only,
+  by design. Runnable directly via `python narrative.py [--username]
+  [--start-date] [--end-date] [--output]` (defaults to schr3b3r's real
+  Q3 2026 range), matching Milestone 8's eventual "generate journey from
+  already-ingested data" entrypoint.
+  **Real output observed:** ran against schr3b3r's real 2026-07-01 to
+  2026-09-30 data (38 rollups, 35 notability signals evaluated); only
+  one quarter rollup existed for that range, so the document has one
+  `## Q3 2026` section, with real, specific multi-paragraph prose about
+  the actual repos/work (`fulcradynamics/community-skills`,
+  `flow-state-app-v2`, `fulcra-agent-harness-starter` -- real narrative,
+  not generic boilerplate) for the high-volume/new-repo/focus-switch
+  stretches, and a real compressed clause ("Following a brief period of
+  inactivity in early August...") for the quiet week rather than a
+  silent omission. Output written to
+  `app/engineering_journey_schr3b3r.md` (not committed -- generated
+  output, not source, and it names a real account; regenerable any time
+  via the CLI entrypoint above).
+  **Real bug found and fixed post-task-run (not a Milestone 7 bug):**
+  the harness task run's own initial full-suite run failed one
+  pre-existing test (`test_real_account_notability_signal_uses_real_rollups`,
+  asserting exactly one `NotabilitySignal` per real week rollup) because
+  9 stray `NotabilitySignal` records for schr3b3r/week existed in Fulcra
+  from an earlier manual/task run that didn't get cleaned up -- the same
+  recurring "stray ad-hoc Fulcra writes" issue noted after Milestone 1.
+  Fixed by clearing them via `clear_notability_signals` (not a code
+  change); confirmed the affected test and then the full suite both pass
+  clean afterward. The original task run hit the harness's
+  `max_iterations=30` cap before reaching `git_commit` -- completed
+  manually: verified the real generated files, cleaned up the stray
+  records above, updated `app/features/INDEX.md` /
+  `app/features/07_narrative_generation.md` / this file (the task run
+  had written the code and the real output but not these doc updates
+  yet), reran the full suite clean, and committed.
 - **(Milestone 6 complete)** Built `notability.py` implementing the
   `NotabilitySignal` Fulcra record model and personal-baseline comparison logic.
   `compute_baseline_stats` calculates mean and standard deviation of total activity

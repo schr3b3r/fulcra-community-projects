@@ -18,3 +18,6 @@ app/**/__pycache__/
 
 # OS
 .DS_Store
+
+# Generated journey narrative output (real, regenerable content, not source)
+app/engineering_journey_*.md
