@@ -102,10 +102,17 @@ def run_backfill(
         repo_names=repo_names,
         client=client,
     )
-    logger.info(
-        "Raw activity backfill completed: %s items processed.",
-        raw_res.get("completed_items_count"),
-    )
+    if raw_res.get("is_delta"):
+        logger.info(
+            "Raw activity delta backfill completed: %s items processed for new repos: %s.",
+            raw_res.get("completed_items_count"),
+            raw_res.get("new_repos"),
+        )
+    else:
+        logger.info(
+            "Raw activity backfill completed: %s items processed.",
+            raw_res.get("completed_items_count"),
+        )
 
     # Split the full range at the same "recent 90 days" boundary
     # github_activity.generate_period_chunks already uses for raw ingestion
@@ -385,7 +392,13 @@ def main() -> None:
             repo_names=args.repos,
         )
         print("Backfill completed successfully!")
-        print(f"Raw items processed: {results['raw_backfill'].get('completed_items_count')}")
+        if results["raw_backfill"].get("is_delta"):
+            print(
+                f"Raw delta items processed: {results['raw_backfill'].get('completed_items_count')} "
+                f"(new repos: {results['raw_backfill'].get('new_repos')})"
+            )
+        else:
+            print(f"Raw items processed: {results['raw_backfill'].get('completed_items_count')}")
         print(f"Day/Week rollups: {results['day_week_rollups'].get('rollups_generated')}")
         print(f"Month rollups: {results['month_rollups'].get('rollups_generated')}")
         print(f"Quarter rollups: {results['quarter_rollups'].get('rollups_generated')}")
