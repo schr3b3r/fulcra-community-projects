@@ -117,6 +117,25 @@ yet started. Consult both, but don't duplicate one into the other.
 (Newest at the top. One entry per meaningful decision — not a full
 chronological journal, just high-signal architectural notes.)
 
+- **(Post-Milestone-8 fix)** Real-world feedback from the first actual
+  fresh-VM/fresh-agent test of this skill (a different real GitHub
+  account than schr3b3r's, per the whole point of this project): the
+  original `SKILL.md` Step 1 front-loaded GitHub + Fulcra + Gemini auth
+  into a single big numbered-list message before doing anything, which
+  felt like a lot to absorb at once. Rewrote Step 1 to walk through each
+  requirement one at a time in conversation (GitHub fully resolved, THEN
+  Fulcra, THEN Gemini) rather than asking for everything up front. Also
+  changed the GitHub auth default: previously it just said "obtain a
+  PAT"; now it defaults to the OAuth device-code browser flow (open a
+  browser, enter a short code) as the lower-friction path for a human at
+  a fresh machine, falling back to a manually-created PAT only if the
+  device flow genuinely can't run. Inlined the actual proven device-flow
+  curl commands directly into SKILL.md (rather than only referencing the
+  bundled `github-auth` skill by name) since a genuinely fresh
+  VM/session may not have that skill bundled -- this profile itself
+  opted out of bundled-skill seeding, so "assume it's there" was not a
+  safe default.
+
 - **(Milestone 8 complete)** Built `engineering_journey.py`, unifying all project layers
   behind a single, clean CLI entrypoint with `backfill` and `generate` subcommands following
   Context-Compute Separation. `backfill` orchestrates raw ingestion, day/week/month/quarter/year
