@@ -15,30 +15,73 @@ This skill is split into two clean steps following Context-Compute Separation:
 1. `backfill`: Slow, durable ingestion pass. Ingests raw GitHub activity into Fulcra, generates day/week/month/quarter/year activity rollups, and computes personal baseline notability signals. Run once per date range.
 2. `generate`: Fast, re-runnable narrative generation pass. Reads stored rollups and notability signals from Fulcra and synthesizes the Markdown journey document without hitting GitHub APIs.
 
+**If you were pointed directly at this repo** (a URL, a local path, or
+"try this skill out") rather than invoked via an installed Hermes skill,
+this file IS the skill definition -- follow it as such. First locate the
+repo root (the directory containing this `SKILL.md`, `README.md`, and
+`app/`) and treat all paths/commands below as relative to it; clone it
+first if you were only given a URL/reference, not a local path.
+
 ---
 
 ## Execution Steps
 
-Follow these steps in order when invoked by a user:
+Follow these steps in order when invoked by a user. Do not skip to
+Step 2/3 before Step 1's checks are genuinely confirmed, even if the
+user seems eager to jump straight to running something -- an
+unauthenticated `backfill` run partway through is a worse experience
+than a few seconds of upfront checking.
+
 
 ### Step 1: Verify Authentication & Prerequisites
 
-1. **GitHub Authentication**:
-   - Obtain a GitHub Personal Access Token (PAT) with `repo` and `read:org` scopes.
-   - Do NOT depend on `gh` CLI session identity.
-   - Ensure `GITHUB_TOKEN` and `GITHUB_USERNAME` environment variables are set or passed as parameters.
+Check-first, remediate-only-if-needed for both. Do not ask the user for
+credentials before actually checking whether usable ones already exist.
 
-2. **Fulcra Authentication**:
-   - Confirm the user is logged into Fulcra.
-   - Use the `fulcra-connect` skill if needed: `skill_view(name="https://raw.githubusercontent.com/fulcradynamics/agent-skills/refs/heads/main/skills/fulcra-connect/SKILL.md")`.
-   - Verify credentials exist at `~/.config/fulcra/credentials.json` or path in `FULCRA_CREDENTIALS_PATH`.
+1. **GitHub Authentication** (check before asking):
+   - First check whether `GITHUB_TOKEN` and `GITHUB_USERNAME` are already
+     set (env vars, or already present in a local `.env`).
+   - If not, check whether the `gh` CLI is installed and already
+     authenticated: `gh auth status`. If so, you can derive a usable
+     token via `gh auth token` and the username via `gh api user --jq
+     .login` -- offer to use that identity rather than asking the user
+     to create a new PAT from scratch, unless they want a different
+     account than whatever `gh` is currently logged in as.
+   - Only if neither of the above yields a usable identity, ask the user
+     for a GitHub Personal Access Token (PAT) with `repo` and
+     `read:org` scopes (https://github.com/settings/tokens), and which
+     username it belongs to.
+   - Do NOT hardcode or assume the host machine's `gh` session is
+     necessarily the right identity to run this skill as -- confirm it's
+     the account the user actually wants a journey for, since `gh` may be
+     logged in as a different account than the one whose ~20 years of
+     history they want covered.
+   - Write the resolved token/username into `.env` (`GITHUB_TOKEN=...`,
+     `GITHUB_USERNAME=...`) so subsequent commands in this session don't
+     need them repeated.
 
-3. **Python Environment**:
-   - Ensure dependencies are installed:
+2. **Fulcra Authentication** (check before asking):
+   - Check whether valid Fulcra credentials already exist, e.g. by
+     confirming `~/.config/fulcra/credentials.json` (or the path in
+     `FULCRA_CREDENTIALS_PATH`) exists and is non-expired/refreshable --
+     `app/fulcra_client.py`'s `get_fulcra_client()` will raise a clear
+     `FulcraAuthError` if not, which is a fine way to check this for
+     real rather than guessing from file presence alone.
+   - Only if that fails, walk the user through the `fulcra-connect` skill
+     to log in: `skill_view(name="https://raw.githubusercontent.com/fulcradynamics/agent-skills/refs/heads/main/skills/fulcra-connect/SKILL.md")`.
+     Do not proceed past this step until Fulcra auth is confirmed working.
+
+3. **Python Environment** (set this up yourself, don't just hand the user
+   a command to run):
+   - Create/activate a venv and install dependencies:
      ```bash
+     python -m venv .venv && source .venv/bin/activate
      pip install -r requirements.txt
      ```
-   - Ensure `GEMINI_API_KEY` is set in environment or `.env` for LLM narrative synthesis.
+   - Ensure `GEMINI_API_KEY` is set (env or `.env`) for LLM narrative
+     synthesis -- ask the user for this one specifically if it's not
+     already present anywhere; there's no way to detect/reuse an
+     existing key the way GitHub/Fulcra auth can be detected.
 
 ### Step 2: Execute Ingestion & Rollups (`backfill`)
 
