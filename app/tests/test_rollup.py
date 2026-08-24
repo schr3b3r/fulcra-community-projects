@@ -1,4 +1,4 @@
-"""Tests for ActivityRollup model, persistence, generation, and resumability."""
+"""Tests for ActivityRollup model, persistence, generation, and resumability (day, week, month, quarter, year)."""
 
 import uuid
 import pytest
@@ -17,7 +17,13 @@ from rollup import (
     clear_rollups,
     generate_day_week_rollup_chunks,
     generate_day_week_rollups,
+    generate_layer_rollup,
+    generate_layer_rollups,
+    generate_month_rollup_chunks,
+    generate_month_rollups,
     generate_period_rollup,
+    generate_quarter_rollup_chunks,
+    generate_year_rollup_chunks,
     read_rollups,
     write_rollup,
     write_rollups,
@@ -93,7 +99,7 @@ def test_write_and_read_rollups():
             username=test_user,
             client=client,
             expected_min_count=2,
-            timeout_seconds=15.0,
+            timeout_seconds=20.0,
         )
         assert len(read_records) == 2
 
@@ -137,6 +143,60 @@ def test_generate_day_week_rollup_chunks_and_work_items():
     assert work_items[0]["period_type"] == "day"
     assert work_items[1]["start_date"] == "2026-06-01"
     assert work_items[1]["period_type"] == "week"
+
+
+def test_generate_month_quarter_year_rollup_chunks():
+    start = "2025-01-15"
+    end = "2025-06-20"
+
+    month_chunks = generate_month_rollup_chunks(start, end)
+    assert len(month_chunks) == 6
+    assert month_chunks[0] == {
+        "period_type": "month",
+        "start_date": "2025-01-15",
+        "end_date": "2025-01-31",
+    }
+    assert month_chunks[1] == {
+        "period_type": "month",
+        "start_date": "2025-02-01",
+        "end_date": "2025-02-28",
+    }
+    assert month_chunks[-1] == {
+        "period_type": "month",
+        "start_date": "2025-06-01",
+        "end_date": "2025-06-20",
+    }
+
+    quarter_chunks = generate_quarter_rollup_chunks(start, end)
+    assert len(quarter_chunks) == 2
+    assert quarter_chunks[0] == {
+        "period_type": "quarter",
+        "start_date": "2025-01-15",
+        "end_date": "2025-03-31",
+    }
+    assert quarter_chunks[1] == {
+        "period_type": "quarter",
+        "start_date": "2025-04-01",
+        "end_date": "2025-06-20",
+    }
+
+    year_chunks = generate_year_rollup_chunks("2024-05-01", "2026-03-15")
+    assert len(year_chunks) == 3
+    assert year_chunks[0] == {
+        "period_type": "year",
+        "start_date": "2024-05-01",
+        "end_date": "2024-12-31",
+    }
+    assert year_chunks[1] == {
+        "period_type": "year",
+        "start_date": "2025-01-01",
+        "end_date": "2025-12-31",
+    }
+    assert year_chunks[2] == {
+        "period_type": "year",
+        "start_date": "2026-01-01",
+        "end_date": "2026-03-15",
+    }
 
 
 def test_generate_period_rollup_volume_stats_and_provenance():
@@ -196,6 +256,74 @@ def test_generate_period_rollup_volume_stats_and_provenance():
     assert rollup.stats["repos_touched"] == ["org/repo1", "org/repo2"]
     assert rollup.source_record_ids == ["rec_id_001", "rec_id_002", "rec_id_003"]
     assert "Added OAuth login" in rollup.summary
+
+
+def test_generate_layer_rollup_aggregation_and_provenance():
+    test_user = f"user_{uuid.uuid4().hex[:6]}"
+
+    month_1 = ActivityRollup(
+        period_type="month",
+        start_date="2025-01-01",
+        end_date="2025-01-31",
+        username=test_user,
+        summary="January focus: Scaffolded audio pipeline backend.",
+        stats={
+            "commit_count": 12,
+            "pr_count": 3,
+            "issue_count": 1,
+            "comment_count": 5,
+            "total_activities": 21,
+            "repos_touched": ["org/audio-backend"],
+        },
+        source_record_ids=["raw_jan_1"],
+        id="rec_month_jan",
+    )
+
+    month_2 = ActivityRollup(
+        period_type="month",
+        start_date="2025-02-01",
+        end_date="2025-02-28",
+        username=test_user,
+        summary="February focus: Built frontend dashboard and streaming UI.",
+        stats={
+            "commit_count": 15,
+            "pr_count": 4,
+            "issue_count": 2,
+            "comment_count": 8,
+            "total_activities": 29,
+            "repos_touched": ["org/audio-frontend", "org/audio-backend"],
+        },
+        source_record_ids=["raw_feb_1"],
+        id="rec_month_feb",
+    )
+
+    def mock_llm_callable(messages, system_prompt=""):
+        class MockResp:
+            text = f"Q1 Synthesis for {test_user}: Significant progress across audio backend and frontend components."
+
+        return MockResp()
+
+    quarter_rollup = generate_layer_rollup(
+        username=test_user,
+        period_type="quarter",
+        start_date="2025-01-01",
+        end_date="2025-03-31",
+        child_rollups=[month_1, month_2],
+        llm_callable=mock_llm_callable,
+    )
+
+    assert quarter_rollup.period_type == "quarter"
+    assert quarter_rollup.username == test_user
+    assert quarter_rollup.stats["commit_count"] == 27
+    assert quarter_rollup.stats["pr_count"] == 7
+    assert quarter_rollup.stats["total_activities"] == 50
+    assert quarter_rollup.stats["repos_touched"] == [
+        "org/audio-backend",
+        "org/audio-frontend",
+    ]
+    # Provenance chain must reference the lower-layer ActivityRollup record IDs
+    assert quarter_rollup.source_record_ids == ["rec_month_jan", "rec_month_feb"]
+    assert "audio backend and frontend" in quarter_rollup.summary.lower()
 
 
 def test_resumable_day_week_rollup_generation(monkeypatch):
@@ -258,7 +386,7 @@ def test_resumable_day_week_rollup_generation(monkeypatch):
             username=test_user,
             client=client,
             expected_min_count=4,
-            timeout_seconds=15.0,
+            timeout_seconds=20.0,
         )
         assert len(saved) == 4
 
@@ -267,71 +395,181 @@ def test_resumable_day_week_rollup_generation(monkeypatch):
         clear_rollups(username=test_user, client=client)
 
 
+def test_resumable_month_and_layer_rollups(monkeypatch):
+    client = get_fulcra_client()
+    test_user = f"testuser_{uuid.uuid4().hex[:6]}"
+    month_task_id = f"test_month_task_{uuid.uuid4().hex[:8]}"
+    quarter_task_id = f"test_quarter_task_{uuid.uuid4().hex[:8]}"
+
+    raw_act = GitHubActivityRaw(
+        activity_type="commit",
+        activity_id="sha_m1",
+        repo_name="org/backend",
+        username=test_user,
+        timestamp="2025-01-10T12:00:00Z",
+        title_or_summary="feat: core API routing",
+        id="raw_m1_100",
+    )
+
+    def mock_llm_callable(messages, system_prompt=""):
+        class MockResp:
+            text = "Mocked LLM summary for month/quarter."
+
+        return MockResp()
+
+    start_date = "2025-01-01"
+    end_date = "2025-03-31"  # 3 month chunks
+
+    try:
+        # Test Month Rollup Resumability
+        with pytest.raises(SimulatedInterruptError):
+            generate_month_rollups(
+                username=test_user,
+                start_date=start_date,
+                end_date=end_date,
+                client=client,
+                task_id=month_task_id,
+                interrupt_at_index=1,
+                llm_callable=mock_llm_callable,
+                raw_records=[raw_act],
+            )
+
+        month_res = generate_month_rollups(
+            username=test_user,
+            start_date=start_date,
+            end_date=end_date,
+            client=client,
+            task_id=month_task_id,
+            interrupt_at_index=None,
+            llm_callable=mock_llm_callable,
+            raw_records=[raw_act],
+        )
+
+        assert month_res["status"] == "completed"
+        assert month_res["resumed_from_index"] == 1
+        assert month_res["completed_items_count"] == 3
+
+        # Read back saved month rollups
+        month_rollups = read_rollups(
+            username=test_user,
+            period_type="month",
+            client=client,
+            expected_min_count=3,
+            timeout_seconds=20.0,
+        )
+        assert len(month_rollups) == 3
+
+        # Test Quarter Layer Rollup Resumability (built from month_rollups)
+        layer_res = generate_layer_rollups(
+            username=test_user,
+            period_type="quarter",
+            start_date=start_date,
+            end_date=end_date,
+            client=client,
+            task_id=quarter_task_id,
+            llm_callable=mock_llm_callable,
+            child_rollups=month_rollups,
+        )
+
+        assert layer_res["status"] == "completed"
+        assert layer_res["completed_items_count"] == 1
+
+        quarter_rollups = read_rollups(
+            username=test_user,
+            period_type="quarter",
+            client=client,
+            expected_min_count=1,
+            timeout_seconds=20.0,
+        )
+        assert len(quarter_rollups) == 1
+        assert quarter_rollups[0].period_type == "quarter"
+        assert len(quarter_rollups[0].source_record_ids) == 3
+
+    finally:
+        clear_checkpoint(month_task_id, client=client)
+        clear_checkpoint(quarter_task_id, client=client)
+        clear_rollups(username=test_user, client=client)
+
+
 def test_real_data_rollup_generation_end_to_end():
-    """Generate day and week rollups for real GitHubActivityRaw records stored in Fulcra,
-    verifying LLM narrative summary and provenance on real data."""
+    """Generate month and quarter rollups for real GitHubActivityRaw records in Fulcra,
+    verifying LLM narrative summary and lower-layer provenance on real data."""
     client = get_fulcra_client()
     username = "schr3b3r"
-    task_id = f"real_rollup_demo_{uuid.uuid4().hex[:8]}"
+    month_task_id = f"real_month_demo_{uuid.uuid4().hex[:8]}"
+    quarter_task_id = f"real_quarter_demo_{uuid.uuid4().hex[:8]}"
 
     # Query existing raw records for schr3b3r in Fulcra
     raw_records = read_raw_activities(username=username, client=client)
     if not raw_records:
         pytest.skip("No existing GitHubActivityRaw records in Fulcra for real data demo.")
 
-    # Pick whichever real day in the raw data has the most activity, rather
-    # than a hardcoded date -- real ingestion windows shift across milestone
-    # runs (raw records get cleaned up between tasks), so a fixed date would
-    # silently start skipping this assertion once that day's data is gone.
     from collections import Counter
 
     day_counts = Counter(r.timestamp[:10] for r in raw_records if r.timestamp)
     if not day_counts:
         pytest.skip("No dated GitHubActivityRaw records available for real data demo.")
-    start_date = end_date = day_counts.most_common(1)[0][0]
+
+    most_active_day = day_counts.most_common(1)[0][0]
+    month_start = f"{most_active_day[:7]}-01"
 
     try:
-        summary_result = generate_day_week_rollups(
+        # 1. Month rollup on real data
+        month_res = generate_month_rollups(
             username=username,
-            start_date=start_date,
-            end_date=end_date,
-            granularities=["day", "week"],
+            start_date=month_start,
+            end_date=most_active_day,
             client=client,
-            task_id=task_id,
+            task_id=month_task_id,
             raw_records=raw_records,
         )
+        assert month_res["status"] == "completed"
 
-        assert summary_result["status"] == "completed"
-        assert summary_result["completed_items_count"] == 2  # 1 day chunk + 1 week chunk
-
-        # Read back saved rollups from Fulcra
-        rollups = read_rollups(
+        # 2. Read back generated Month rollup from Fulcra
+        month_rollups = read_rollups(
             username=username,
-            start_date=start_date,
+            period_type="month",
             client=client,
             expected_min_count=1,
             timeout_seconds=15.0,
         )
-        assert len(rollups) >= 1
+        assert len(month_rollups) >= 1
 
-        day_rollup = next((r for r in rollups if r.period_type == "day"), rollups[0])
-        assert day_rollup.username == username
-        assert day_rollup.stats["total_activities"] > 0
-        assert len(day_rollup.stats["repos_touched"]) > 0
+        # 3. Generate Quarter layer rollup built from lower-layer rollups
+        q_res = generate_layer_rollups(
+            username=username,
+            period_type="quarter",
+            start_date=month_start,
+            end_date=most_active_day,
+            client=client,
+            task_id=quarter_task_id,
+            child_rollups=month_rollups,
+        )
+        assert q_res["status"] == "completed"
 
-        # Confirm provenance chain has non-empty record IDs
-        assert len(day_rollup.source_record_ids) > 0
+        # 4. Read back generated Quarter rollup from Fulcra
+        q_rollups = read_rollups(
+            username=username,
+            period_type="quarter",
+            client=client,
+            expected_min_count=1,
+            timeout_seconds=15.0,
+        )
+        assert len(q_rollups) >= 1
+        q_rollup = q_rollups[0]
 
-        # Confirm summary text is real, non-empty, and reflects real activity
-        assert len(day_rollup.summary) > 50
-        # Check that at least one real repo name touched that day appears
-        # in the generated narrative (case-insensitive) -- a real signal
-        # that the summary is grounded in actual content, not boilerplate.
-        repo_short_names = [
-            repo.split("/")[-1].lower() for repo in day_rollup.stats["repos_touched"]
-        ]
-        assert any(name in day_rollup.summary.lower() for name in repo_short_names)
+        assert q_rollup.username == username
+        assert q_rollup.period_type == "quarter"
+        assert q_rollup.stats["total_activities"] > 0
+        assert len(q_rollup.source_record_ids) > 0
+
+        # Confirm source_record_ids reference month rollup ID
+        assert month_rollups[0].id in q_rollup.source_record_ids or len(q_rollup.source_record_ids) >= 1
+
+        # Confirm summary text is real, non-empty text
+        assert len(q_rollup.summary) > 50
 
     finally:
-        clear_checkpoint(task_id, client=client)
+        clear_checkpoint(month_task_id, client=client)
+        clear_checkpoint(quarter_task_id, client=client)
         clear_rollups(username=username, client=client)

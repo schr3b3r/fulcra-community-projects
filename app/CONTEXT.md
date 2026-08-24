@@ -30,12 +30,12 @@ a markdown file.
 
 ## Current State
 Milestones 1 (resumable backfill checkpoint), 2 (real GitHub ingestion),
-3 (full 3-year backfill chunking + real at-scale resumability), and 4
-(day/week rollup layer with real LLM narrative summaries) are DONE —
-see `checkpoint.py`, `github_client.py`, `github_activity.py`,
-`rollup.py`, and `app/features/`. Milestone 5 (month/quarter/year
-rollups) is next. See `plan.md` (at the repo root) for the full intended
-build sequence.
+3 (full 3-year backfill chunking + real at-scale resumability), 4
+(day/week rollup layer with real LLM narrative summaries), and 5
+(month/quarter/year rollup layer with hierarchical provenance chains)
+are DONE — see `checkpoint.py`, `github_client.py`, `github_activity.py`,
+`rollup.py`, and `app/features/`. Milestone 6 (notability signal) is next.
+See `plan.md` (at the repo root) for the full intended build sequence.
 
 ## Fulcra SDK usage notes (verified against the real API, not assumed)
 These are exact, tested call shapes for the `fulcra-api` SDK calls this
@@ -113,6 +113,18 @@ yet started. Consult both, but don't duplicate one into the other.
 (Newest at the top. One entry per meaningful decision — not a full
 chronological journal, just high-signal architectural notes.)
 
+- **(Milestone 5 complete)** Extended `rollup.py` with month, quarter, and
+  year rollup logic. `generate_month_rollup_chunks`, `generate_quarter_rollup_chunks`,
+  and `generate_year_rollup_chunks` divide date ranges into calendar period chunks.
+  `generate_month_rollups` processes raw `GitHubActivityRaw` records directly into
+  `period_type="month"` rollups via `generate_period_rollup`, skipping the weekly
+  layer for historical activity (>90 days old) per Interview decision #1.
+  `generate_layer_rollup` / `generate_layer_rollups` builds higher-layer rollups
+  (`quarter`, `year`) from lower-layer child rollups (`week` or `month`), aggregating
+  child volume stats, calling Gemini to synthesize child summaries, and referencing
+  child `ActivityRollup` record IDs in `source_record_ids` to maintain full provenance
+  down to raw activity. Integrated into `checkpoint.process_with_checkpoint` for full
+  resumability. Verified on real data in Fulcra and fully tested in `tests/test_rollup.py`.
 - **(Milestone 4 complete)** `ActivityRollup` Fulcra record type +
   `write_rollup(s)`/`read_rollups`/`clear_rollups` (same
   `MomentAnnotation`-based pattern as prior record types) added in the
