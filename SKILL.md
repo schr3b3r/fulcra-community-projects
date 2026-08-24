@@ -35,53 +35,105 @@ than a few seconds of upfront checking.
 
 ### Step 1: Verify Authentication & Prerequisites
 
-Check-first, remediate-only-if-needed for both. Do not ask the user for
-credentials before actually checking whether usable ones already exist.
+Walk the user through this ONE step at a time, in conversation -- do NOT
+front-load all three requirements (GitHub, Fulcra, Gemini) into a single
+big message with a numbered list before doing anything. Handle GitHub
+fully (check, then remediate if needed, then confirm), THEN move to
+Fulcra, THEN move to Gemini. Each is check-first, remediate-only-if-needed:
+do not ask the user for credentials before actually checking whether
+usable ones already exist.
 
-1. **GitHub Authentication** (check before asking):
-   - First check whether `GITHUB_TOKEN` and `GITHUB_USERNAME` are already
-     set (env vars, or already present in a local `.env`).
-   - If not, check whether the `gh` CLI is installed and already
-     authenticated: `gh auth status`. If so, you can derive a usable
-     token via `gh auth token` and the username via `gh api user --jq
-     .login` -- offer to use that identity rather than asking the user
-     to create a new PAT from scratch, unless they want a different
-     account than whatever `gh` is currently logged in as.
-   - Only if neither of the above yields a usable identity, ask the user
-     for a GitHub Personal Access Token (PAT) with `repo` and
-     `read:org` scopes (https://github.com/settings/tokens), and which
-     username it belongs to.
-   - Do NOT hardcode or assume the host machine's `gh` session is
-     necessarily the right identity to run this skill as -- confirm it's
-     the account the user actually wants a journey for, since `gh` may be
-     logged in as a different account than the one whose ~20 years of
-     history they want covered.
-   - Write the resolved token/username into `.env` (`GITHUB_TOKEN=...`,
-     `GITHUB_USERNAME=...`) so subsequent commands in this session don't
-     need them repeated.
+#### 1a. GitHub Authentication
 
-2. **Fulcra Authentication** (check before asking):
-   - Check whether valid Fulcra credentials already exist, e.g. by
-     confirming `~/.config/fulcra/credentials.json` (or the path in
-     `FULCRA_CREDENTIALS_PATH`) exists and is non-expired/refreshable --
-     `app/fulcra_client.py`'s `get_fulcra_client()` will raise a clear
-     `FulcraAuthError` if not, which is a fine way to check this for
-     real rather than guessing from file presence alone.
-   - Only if that fails, walk the user through the `fulcra-connect` skill
-     to log in: `skill_view(name="https://raw.githubusercontent.com/fulcradynamics/agent-skills/refs/heads/main/skills/fulcra-connect/SKILL.md")`.
-     Do not proceed past this step until Fulcra auth is confirmed working.
+- First check whether `GITHUB_TOKEN` and `GITHUB_USERNAME` are already
+  set (env vars, or already present in a local `.env`). If so, confirm
+  with the user this is the right account (their `gh` session or env
+  vars may belong to a different account than the one they want a ~3-4
+  year journey for) and move on to Fulcra.
+- If not, check whether the `gh` CLI is installed and already
+  authenticated: `gh auth status`. If so, offer to use that identity
+  (derive a token via `gh auth token`, username via `gh api user --jq
+  .login`) rather than starting a fresh login -- again confirming it's
+  the right account, not just whatever happens to be logged in.
+- Otherwise, log the user in fresh. **Default to the OAuth device-code
+  browser flow** (open a browser, enter a short code at
+  github.com/login/device) rather than asking them to manually create a
+  Personal Access Token -- it's the lower-friction default for a human
+  sitting at a fresh machine. If the bundled `github-auth` skill is
+  available in this session, prefer it (`skill_view(name="github-auth")`,
+  then its "Manual OAuth Device Flow" method) since it's a maintained,
+  more thoroughly proven implementation (handles slow_down/expiry/
+  headless-keyring edge cases). If that skill isn't available in this
+  session, run the device flow directly instead of falling back to a
+  manual PAT -- it's a small, self-contained flow:
+  ```bash
+  # 1. Request a device code (gh's public client_id; scope: repo + read:org)
+  RESP=$(curl -s -X POST -H "Accept: application/json" \
+    -d "client_id=178c6fc778ccc68e1d6a&scope=repo,read:org" \
+    https://github.com/login/device/code)
+  DEVICE_CODE=$(echo "$RESP" | sed 's/.*"device_code":"\([^"]*\)".*/\1/')
+  USER_CODE=$(echo "$RESP" | sed 's/.*"user_code":"\([^"]*\)".*/\1/')
+  INTERVAL=$(echo "$RESP" | sed 's/.*"interval":\([0-9]*\).*/\1/'); INTERVAL=${INTERVAL:-5}
+  # Tell the user: open https://github.com/login/device and enter $USER_CODE
 
-3. **Python Environment** (set this up yourself, don't just hand the user
-   a command to run):
-   - Create/activate a venv and install dependencies:
-     ```bash
-     python -m venv .venv && source .venv/bin/activate
-     pip install -r requirements.txt
-     ```
-   - Ensure `GEMINI_API_KEY` is set (env or `.env`) for LLM narrative
-     synthesis -- ask the user for this one specifically if it's not
-     already present anywhere; there's no way to detect/reuse an
-     existing key the way GitHub/Fulcra auth can be detected.
+  # 2. Poll for the token (respect interval; back off +5s on slow_down)
+  while true; do
+    sleep "$INTERVAL"
+    POLL=$(curl -s -X POST -H "Accept: application/json" \
+      -d "client_id=178c6fc778ccc68e1d6a&device_code=${DEVICE_CODE}&grant_type=urn:ietf:params:oauth:grant-type:device_code" \
+      https://github.com/login/oauth/access_token)
+    case "$POLL" in
+      *access_token*)
+        TOKEN=$(echo "$POLL" | sed 's/.*"access_token":"\([^"]*\)".*/\1/')
+        break ;;
+      *authorization_pending*) ;;                      # keep polling
+      *slow_down*) INTERVAL=$((INTERVAL + 5)) ;;
+      *expired_token*) echo "CODE_EXPIRED — restart the flow"; exit 1 ;;
+      *access_denied*) echo "USER_DENIED"; exit 1 ;;
+    esac
+  done
+  # Never echo $TOKEN to the user; use it directly to resolve the username below.
+  ```
+  Only fall back to asking for a manually-created PAT if the device flow
+  genuinely can't run in this environment (no outbound network to
+  github.com, etc.) -- don't offer it as an equal first option.
+- Once authenticated, resolve the username too (`gh api user --jq
+  .login` if using `gh`, or `curl -s -H "Authorization: token $TOKEN"
+  https://api.github.com/user` if not) and write both
+  `GITHUB_TOKEN`/`GITHUB_USERNAME` into `.env` so later steps/commands
+  in this session don't need them repeated.
+- Confirm out loud to the user which GitHub account is now
+  authenticated before moving on.
+
+#### 1b. Fulcra Authentication
+
+- Check whether valid Fulcra credentials already exist -- e.g. confirm
+  `~/.config/fulcra/credentials.json` (or the path in
+  `FULCRA_CREDENTIALS_PATH`) exists and is non-expired/refreshable.
+  `app/fulcra_client.py`'s `get_fulcra_client()` will raise a clear
+  `FulcraAuthError` if not; that's a fine way to check this for real
+  rather than guessing from file presence alone.
+- Only if that fails, walk the user through the `fulcra-connect` skill
+  to log in: `skill_view(name="https://raw.githubusercontent.com/fulcradynamics/agent-skills/refs/heads/main/skills/fulcra-connect/SKILL.md")`.
+  Do this as its own step -- don't combine it with the GitHub ask above.
+  Confirm Fulcra auth is genuinely working before moving on to Gemini.
+
+#### 1c. Gemini API Key & Python Environment
+
+- Ask the user for a `GEMINI_API_KEY` specifically at this point, if one
+  isn't already set (env or `.env`) -- there's no way to detect/reuse an
+  existing key the way GitHub/Fulcra auth can be detected, so this one
+  has to be a direct ask, but keep it its own short exchange rather than
+  bundling it into the earlier GitHub/Fulcra asks.
+- Then set up the Python environment yourself (don't just hand the user
+  a command to run):
+  ```bash
+  python -m venv .venv && source .venv/bin/activate
+  pip install -r requirements.txt
+  ```
+
+Once all three (GitHub, Fulcra, Gemini) are confirmed working, tell the
+user briefly that setup is complete and you're ready to run `backfill`.
 
 ### Step 2: Execute Ingestion & Rollups (`backfill`)
 
