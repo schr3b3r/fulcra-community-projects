@@ -31,10 +31,11 @@ a markdown file.
 ## Current State
 Milestones 1 (resumable backfill checkpoint), 2 (real GitHub ingestion),
 3 (full 3-year backfill chunking + real at-scale resumability), 4
-(day/week rollup layer with real LLM narrative summaries), and 5
-(month/quarter/year rollup layer with hierarchical provenance chains)
-are DONE — see `checkpoint.py`, `github_client.py`, `github_activity.py`,
-`rollup.py`, and `app/features/`. Milestone 6 (notability signal) is next.
+(day/week rollup layer with real LLM narrative summaries), 5
+(month/quarter/year rollup layer with hierarchical provenance chains),
+and 6 (notability signal) are DONE — see `checkpoint.py`, `github_client.py`,
+`github_activity.py`, `rollup.py`, `notability.py`, and `app/features/`.
+Milestone 7 (narrative synthesis & markdown production) is next.
 See `plan.md` (at the repo root) for the full intended build sequence.
 
 ## Fulcra SDK usage notes (verified against the real API, not assumed)
@@ -113,6 +114,54 @@ yet started. Consult both, but don't duplicate one into the other.
 (Newest at the top. One entry per meaningful decision — not a full
 chronological journal, just high-signal architectural notes.)
 
+- **(Milestone 6 complete)** Built `notability.py` implementing the
+  `NotabilitySignal` Fulcra record model and personal-baseline comparison logic.
+  `compute_baseline_stats` calculates mean and standard deviation of total activity
+  and commit counts across same-period_type rollups for an account.
+  `generate_notability_signal` evaluates a period against personal baseline and
+  detects volume spikes (`high_volume`), first activity in a repository (`new_repo`),
+  dominant repository focus shifts (`focus_switch`), activity gaps following active
+  stretches (`low_volume_gap`), and sustained activity streaks (`streak`), scoring
+  notability between 0.0 and 1.0 with human-readable explanations and provenance
+  linking to `source_rollup_id`.
+  `generate_notability_signals` integrates into `checkpoint.process_with_checkpoint`
+  for resumable execution across multiple periods. Verified on real data in Fulcra
+  and thoroughly tested in `tests/test_notability.py`.
+  **Post-task-run follow-up:** the task's own `git_commit` attempt failed
+  the test gate on a timeout, not a test failure (`TEST_RUNNER_TIMEOUT_SECONDS`,
+  last raised to 300s in Milestone 3, was no longer enough once this
+  feature's real tests were added to the growing suite) — raised to 480s
+  in `harness/tools/git_tool.py`. Also added
+  `test_real_account_notability_signal_uses_real_rollups`, computing
+  signals against schr3b3r's actual stored week rollups (not just
+  synthetic data under a throwaway username, matching the verification
+  bar Milestones 4-5 held themselves to): correctly identified the
+  account's single busiest real week (69 activities vs a 13.5 baseline
+  average) as the highest-scored, `high_volume`+`focus_switch`-flagged
+  signal among its real weeks, two real zero-activity weeks as
+  `low_volume_gap`, and a real first-time repo appearance as `new_repo`.
+  **Real bug found and fixed:** Milestone 5's own real-data test
+  (`test_real_data_rollup_generation_end_to_end` in `test_rollup.py`)
+  cleaned up after itself with `clear_rollups(username=username,
+  client=client)` — no `period_type` filter — which tombstones ALL of
+  that username's rollups, not just the month/quarter ones the test
+  itself created. Every full-suite run was silently wiping schr3b3r's
+  real day/week rollups (Milestone 4's data) as a side effect of
+  Milestone 5's test cleanup. Fixed by scoping that test's cleanup to
+  `period_type="month"` and `period_type="quarter"` specifically. Real
+  day/week rollups were regenerated afterward to restore the account's
+  rollup history for future milestones/testing.
+- **(Known intermittent flake, mitigated)** `test_write_and_read_raw_activities`
+  in `test_github_activity.py` has repeatedly (3 times during Milestone 6's
+  commit attempts) failed the git_commit test gate's full-suite run with a
+  0-records-read-back result, then passed cleanly in isolation seconds
+  later — the same eventual-consistency category as the other polling
+  fixes in this log, just with a larger gap between write and read under
+  full-suite load than its 15s poll timeout covered. Bumped that test's
+  `timeout_seconds` from 15.0 to 30.0 as a mitigation. If this keeps
+  recurring even at 30s, treat it as a signal that Fulcra's real
+  eventual-consistency window is longer under sustained load than these
+  polling timeouts assume, not as a flaky-test-to-ignore.
 - **(Milestone 5 complete)** Extended `rollup.py` with month, quarter, and
   year rollup logic. `generate_month_rollup_chunks`, `generate_quarter_rollup_chunks`,
   and `generate_year_rollup_chunks` divide date ranges into calendar period chunks.

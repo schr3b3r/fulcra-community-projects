@@ -639,4 +639,12 @@ def test_real_data_rollup_generation_end_to_end():
     finally:
         clear_checkpoint(month_task_id, client=client)
         clear_checkpoint(quarter_task_id, client=client)
-        clear_rollups(username=username, client=client)
+        # Scoped to ONLY the period_types this test itself created (month,
+        # quarter) -- a blanket clear_rollups(username=username) here would
+        # also delete any real day/week rollups Milestone 4 generated for
+        # this same account, which is real, expensive-to-regenerate data
+        # this test did not create and has no business deleting. Found as
+        # a real bug: every full-suite run was silently wiping all of
+        # schr3b3r's stored rollups as a side effect of this cleanup.
+        clear_rollups(username=username, period_type="month", client=client)
+        clear_rollups(username=username, period_type="quarter", client=client)

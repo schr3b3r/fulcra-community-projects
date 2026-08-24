@@ -101,7 +101,7 @@ def test_write_and_read_raw_activities():
             repo_name=test_repo,
             client=client,
             expected_min_count=2,
-            timeout_seconds=15.0,
+            timeout_seconds=30.0,
         )
         assert len(read_records) == 2
 
