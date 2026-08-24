@@ -14,6 +14,7 @@ status changes.
 | [05_rollup_layer_month_quarter_year.md](05_rollup_layer_month_quarter_year.md) | done | Month (older history) + quarter/year (both) rollup generation with hierarchical provenance chains |
 | [06_notability_signal.md](06_notability_signal.md) | done | First-pass personal baseline, volume variance, firsts, focus switches, streaks, and gaps notability scoring |
 | [07_narrative_generation.md](07_narrative_generation.md) | done | Reads the full rollup + notability layer and synthesizes one paced Markdown journey document with a provenance appendix |
+| [08_packaging_hermes_skill.md](08_packaging_hermes_skill.md) | done | Unified CLI entrypoint, SKILL.md, README.md, requirements.txt, and packaging for execution by fresh agents or humans |
 
 ## Status values
 - `not_started` — described but no work done yet.

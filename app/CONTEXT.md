@@ -29,15 +29,17 @@ a markdown file.
 (See `architecture.md` at the repo root for the full architecture writeup this summary was excerpted from.)
 
 ## Current State
-Milestones 1 (resumable backfill checkpoint), 2 (real GitHub ingestion),
-3 (full 3-year backfill chunking + real at-scale resumability), 4
-(day/week rollup layer with real LLM narrative summaries), 5
-(month/quarter/year rollup layer with hierarchical provenance chains),
-6 (notability signal), and 7 (narrative synthesis & markdown production)
-are DONE — see `checkpoint.py`, `github_client.py`, `github_activity.py`,
-`rollup.py`, `notability.py`, `narrative.py`, and `app/features/`.
-Milestone 8 (packaging as an installable Hermes skill) is next.
-See `plan.md` (at the repo root) for the full intended build sequence.
+All Milestones 1–8 are DONE:
+- Milestone 1: Resumable backfill checkpoint (`checkpoint.py`)
+- Milestone 2: Real GitHub raw activity ingestion (`github_client.py`, `github_activity.py`)
+- Milestone 3: Full 3-year backfill chunking + real at-scale resumability (`github_activity.py`)
+- Milestone 4: Day/week rollup layer with real LLM summaries (`rollup.py`)
+- Milestone 5: Month/quarter/year rollup layer with hierarchical provenance chains (`rollup.py`)
+- Milestone 6: Personal baseline notability signal scoring (`notability.py`)
+- Milestone 7: Narrative synthesis & Markdown production (`narrative.py`)
+- Milestone 8: Packaging as an installable Hermes skill (`engineering_journey.py`, `SKILL.md`, `README.md`, `requirements.txt`)
+
+The project is fully packaged, tested, and ready for execution by fresh agents or human users.
 
 ## Fulcra SDK usage notes (verified against the real API, not assumed)
 These are exact, tested call shapes for the `fulcra-api` SDK calls this
@@ -115,6 +117,45 @@ yet started. Consult both, but don't duplicate one into the other.
 (Newest at the top. One entry per meaningful decision — not a full
 chronological journal, just high-signal architectural notes.)
 
+- **(Milestone 8 complete)** Built `engineering_journey.py`, unifying all project layers
+  behind a single, clean CLI entrypoint with `backfill` and `generate` subcommands following
+  Context-Compute Separation. `backfill` orchestrates raw ingestion, day/week/month/quarter/year
+  rollups, and personal baseline notability signals; `generate` synthesizes narrative Markdown
+  documents from stored Fulcra records without re-querying GitHub APIs. Accepts configurable
+  multi-year history bounds (`--years`, `--start-date`, `--end-date`) and environment variable fallbacks
+  (`GITHUB_TOKEN`, `GITHUB_USERNAME`, `FULCRA_CREDENTIALS_PATH`). Authored root `SKILL.md` (agent-facing
+  instructions in Hermes format) and root `README.md` (human-facing developer documentation), and
+  `requirements.txt`. Verified end-to-end execution of `generate` via the unified CLI on real `schr3b3r`
+  data (8,540 character output document), and added complete orchestration unit tests in `tests/test_engineering_journey.py`.
+  **Real bug found and fixed post-task-run:** the task run's own `run_backfill`
+  orchestration passed the FULL requested date range straight to
+  `generate_day_week_rollups`, with no 90-day cutoff -- but that function
+  (and `generate_month_rollups`) has no internal recency boundary of its
+  own; only `github_activity.generate_period_chunks` (used for RAW
+  ingestion) enforces Interview decision #1's "recent 90 days
+  daily/weekly, older monthly" split. Left as originally written, running
+  `backfill` over a real 3-4 year range (exactly what this project is
+  about to be used for) would have generated one daily rollup -- and one
+  real LLM call -- for every day across the ENTIRE multi-year window
+  (~1,100-1,460 calls instead of ~90), directly contradicting the
+  decaying-granularity design that exists specifically to keep the
+  narrative pass's total LLM-call count reasonable (see Interview
+  decision #5). Fixed by splitting the requested range at the same
+  90-day boundary inside `run_backfill` itself (`RECENT_WINDOW_DAYS`
+  constant) before calling `generate_day_week_rollups` (recent window
+  only) vs. `generate_month_rollups` (older window only) -- quarter/year
+  layer rollups still span the full range, since they aggregate whichever
+  child rollups exist. Added `test_run_backfill_orchestration_flow`
+  (updated to assert the split call arguments over a real ~5-month range)
+  and a new `test_run_backfill_short_range_skips_month_rollups` covering
+  the case where the whole requested range fits inside the recent
+  window (month rollups correctly skipped rather than called with an
+  inverted/empty range). Also removed stray duplicate `SKILL.md`/
+  `README.md`/`requirements.txt` files the task run had accidentally
+  written into `app/` in addition to the (correct) repo root copies.
+  Full suite reran clean after the fix (one `test_write_and_read_raw_activities`
+  failure was the already-documented eventual-consistency flake above --
+  passed cleanly on immediate retry in isolation, not a real regression).
 - **(Milestone 7 complete)** Built `narrative.py`, the final read +
   synthesize + write-to-disk pass over the full rollup/notability
   structure. `build_section_contexts` picks quarter rollups as the
