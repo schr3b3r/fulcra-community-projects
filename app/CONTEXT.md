@@ -29,7 +29,7 @@ a markdown file.
 (See `architecture.md` at the repo root for the full architecture writeup this summary was excerpted from.)
 
 ## Current State
-All Milestones 1–9 are DONE:
+All Milestones 1–10 are DONE:
 - Milestone 1: Resumable backfill checkpoint (`checkpoint.py`)
 - Milestone 2: Real GitHub raw activity ingestion (`github_client.py`, `github_activity.py`)
 - Milestone 3: Full 3-year backfill chunking + real at-scale resumability (`github_activity.py`)
@@ -39,11 +39,9 @@ All Milestones 1–9 are DONE:
 - Milestone 7: Narrative synthesis & Markdown production (`narrative.py`)
 - Milestone 8: Packaging as an installable Hermes skill (`engineering_journey.py`, `SKILL.md`, `README.md`, `requirements.txt`)
 - Milestone 9: Migrated all record kinds to real, visible custom Fulcra data types (`fulcra_types.py`)
+- Milestone 10: Private repository discovery fix in `GitHubClient` (`github_client.py`)
 
 The project is fully packaged, tested, and ready for execution by fresh agents or human users.
-Milestone 10 (private repo discovery fix) is next -- see plan.md and the
-Decisions Log entry below for the corrected scope (narrower than
-initially reported).
 
 ## Fulcra SDK usage notes (verified against the real API, not assumed)
 These are exact, tested call shapes for the `fulcra-api` SDK calls this
@@ -190,6 +188,20 @@ yet started. Consult both, but don't duplicate one into the other.
 (Newest at the top. One entry per meaningful decision — not a full
 chronological journal, just high-signal architectural notes.)
 
+- **(Milestone 10 complete)** Fixed private repository discovery gap in
+  `GitHubClient.list_accessible_repositories()` and `enumerate_repositories()`.
+  Added `list_accessible_repositories(pushed_after, pushed_before)` calling
+  `GET /user/repos?affiliation=owner,collaborator,organization_member` with
+  pagination and `pushed_at` window filtering. `enumerate_repositories()`
+  now unions this discovery pass with GraphQL `contributionsCollection` queries,
+  ensuring private repositories (e.g. `schr3b3r/shimmer`, `schr3b3r/thrum`)
+  missed by `contributionsCollection` are discovered before raw activity ingestion.
+  **Real proof performed:** verified `schr3b3r/shimmer` was absent from
+  `enumerate_repositories('2023-01-01', '2026-12-31')` before the fix (8 repos
+  returned) and present after (14 repos returned). Ran real ingestion for
+  `schr3b3r/shimmer` over May 2026, confirmed real `GitHubActivityRaw` records
+  for private commits were written to and read back from Fulcra, and cleaned
+  up all test records. Added unit/live automated tests in `tests/test_github_client.py`.
 - **(Real gap independently re-verified, scope corrected -- Milestone 10
   scoped for it)** The same fresh-account live test's
   `ISSUES_AND_LIMITATIONS.md` (see the Milestone 9-era entry below for
