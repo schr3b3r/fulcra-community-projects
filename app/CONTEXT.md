@@ -30,10 +30,11 @@ a markdown file.
 
 ## Current State
 Milestones 1 (resumable backfill checkpoint), 2 (real GitHub ingestion),
-and 3 (full 3-year backfill chunking + real at-scale resumability) are
-DONE — see `checkpoint.py`, `github_client.py`, `github_activity.py`,
-and `app/features/`. Milestone 4 (rollup layer, day/week for recent 90
-days) is next. See `plan.md` (at the repo root) for the full intended
+3 (full 3-year backfill chunking + real at-scale resumability), and 4
+(day/week rollup layer with real LLM narrative summaries) are DONE —
+see `checkpoint.py`, `github_client.py`, `github_activity.py`,
+`rollup.py`, and `app/features/`. Milestone 5 (month/quarter/year
+rollups) is next. See `plan.md` (at the repo root) for the full intended
 build sequence.
 
 ## Fulcra SDK usage notes (verified against the real API, not assumed)
@@ -112,6 +113,50 @@ yet started. Consult both, but don't duplicate one into the other.
 (Newest at the top. One entry per meaningful decision — not a full
 chronological journal, just high-signal architectural notes.)
 
+- **(Milestone 4 complete)** `ActivityRollup` Fulcra record type +
+  `write_rollup(s)`/`read_rollups`/`clear_rollups` (same
+  `MomentAnnotation`-based pattern as prior record types) added in the
+  new `rollup.py`. `generate_period_rollup` computes structured volume
+  stats directly from matching `GitHubActivityRaw` records (no LLM
+  needed for counts) and calls `harness.providers.gemini.call_model`
+  (the existing provider, reused as-is) for the narrative summary, with
+  an explicit `source_record_ids` provenance chain.
+  `generate_day_week_rollups` chunks a date range into day AND week
+  work items and wires them into Milestone 1's unchanged
+  `process_with_checkpoint` — proven resumable with a real
+  interrupt-at-index-2/resume test across 4 work items.
+  **Real bug found and fixed:** the LLM narrative call was failing
+  silently with `GEMINI_API_KEY not set` whenever code ran without
+  `harness/run_task.py`'s own `load_dotenv()` — including through the
+  `git_commit` test gate itself (which invokes bare `python -m pytest`
+  from `app/`, never `run_task.py`). This meant every rollup generated
+  via the gate would silently produce generic stats-only boilerplate
+  text instead of a real summary, with no visible error — a test could
+  pass while doing the wrong thing. Fixed by (1) adding
+  `app/tests/conftest.py` to load `.env` before any test module runs,
+  and (2) making the previously-silent `except Exception` fallback in
+  `generate_period_rollup` log a warning with the real error instead of
+  swallowing it, so a genuine future failure (rate limit, bad key, etc.)
+  is visible rather than masquerading as success. Found by actually
+  reading a generated rollup's summary text and noticing it was generic
+  boilerplate, not by a failing assertion.
+  **Real output observed:** topped up a small real ingestion window
+  (2026-07-15 to 2026-08-23, 130 real activities across 3 repos) since
+  Milestone 3's own test cleanup had emptied Fulcra of prior raw
+  records, then rolled up a real day (2026-08-20, 53 real activities in
+  `schr3b3r/fulcra-community-projects`) — the generated narrative
+  correctly, specifically described that day's real work (scaffolding
+  the flow-state-app-v2 harness, the FastAPI audio pipeline, the
+  SvelteKit frontend rebuild, real bug fixes) rather than generic text,
+  confirming the LLM summarization path is grounded in real content.
+  The task run for this milestone hit the harness's `max_iterations=30`
+  cap before finishing (built `rollup.py`/`tests/test_rollup.py`, 5/6
+  tests passing) — completed manually: topped up real data, fixed a
+  test's hardcoded stale date (now dynamically picks whichever real day
+  has the most activity, so it won't silently start skipping once that
+  date's data is cleaned up later), fixed a `clear_rollups()` call bug
+  (unsupported `start_date` kwarg), found/fixed the dotenv gap above,
+  reran the full suite, and committed.
 - **(Milestone 3 complete)** `GitHubClient.enumerate_repositories`
   (chunks a full date window into <=1-year GraphQL queries — empirically
   required: a real `contributionsCollection` call spanning >1 year
