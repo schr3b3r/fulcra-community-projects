@@ -2,17 +2,25 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+import hashlib
 import json
+import logging
 import time
 from typing import Any, Dict, List, Optional, Union
 
 from fulcra_api.core import FulcraAPI
 from fulcra_client import get_fulcra_client
 from fulcra_types import get_custom_source_tag
-from checkpoint import process_with_checkpoint, _fetch_annotations_merged
+from checkpoint import (
+    process_with_checkpoint,
+    read_checkpoint,
+    write_checkpoint,
+    _fetch_annotations_merged,
+)
 from github_client import GitHubClient
 
 RAW_RECORD_TYPE = "GitHubActivityRaw"
+logger = logging.getLogger("github_activity")
 
 
 class ActivityStoreError(Exception):
@@ -510,6 +518,11 @@ def ingest_github_activity(
         client=client,
         interrupt_at_index=interrupt_at_index,
         stage=stage,
+        metadata={
+            "repo_names": sorted(repo_names),
+            "total_repos": len(repo_names),
+            "username": username,
+        },
     )
 
     completed_count = checkpoint_result["completed_items_count"]
@@ -576,8 +589,118 @@ def backfill_full_github_activity(
         task_id = f"backfill_3yr:{gh_client.username}:{start_str}_{end_str}"
 
     period_chunks = generate_period_chunks(start_dt, end_dt)
-    items = build_backfill_work_items(repo_names, period_chunks)
+    sorted_discovered = sorted(repo_names)
 
+    # Check for existing completed checkpoint and perform delta evaluation if new repos are found
+    existing = read_checkpoint(
+        task_id, client=client, use_cache=use_cache, timeout_seconds=5.0
+    )
+
+    if existing and existing.status == "completed":
+        stored_repos = (
+            existing.metadata.get("repo_names") if existing.metadata else None
+        )
+        if stored_repos is not None and isinstance(stored_repos, list):
+            stored_set = set(stored_repos)
+        else:
+            # Legacy checkpoint missing repo_names: treat coverage as unknown (empty set)
+            # so any discovered repo is ingested via delta backfill.
+            logger.info(
+                "Existing completed checkpoint %s lacks stored repo_names metadata; treating all %d discovered repos as unverified.",
+                task_id,
+                len(sorted_discovered),
+            )
+            stored_set = set()
+
+        new_repos = [r for r in sorted_discovered if r not in stored_set]
+
+        if not new_repos:
+            items = build_backfill_work_items(repo_names, period_chunks)
+            return {
+                "status": "completed",
+                "task_id": task_id,
+                "is_delta": False,
+                "completed_items_count": len(items),
+                "total_items": len(items),
+                "repo_names": repo_names,
+                "period_chunks_count": len(period_chunks),
+                "processed_indices": [],
+                "resumed_from_index": None,
+                "activities_count": 0,
+            }
+
+        # New repos discovered that were not covered by the prior completed checkpoint
+        delta_hash = hashlib.sha256(
+            ",".join(sorted(new_repos)).encode("utf-8")
+        ).hexdigest()[:8]
+        delta_task_id = f"{task_id}:delta:{delta_hash}"
+        delta_items = build_backfill_work_items(new_repos, period_chunks)
+
+        logger.info(
+            "Found %d new repos not covered by prior backfill task %s: %s; ingesting delta now.",
+            len(new_repos),
+            task_id,
+            new_repos,
+        )
+        print(
+            f"Found {len(new_repos)} new repos not covered by prior backfill: {new_repos}. Ingesting delta now..."
+        )
+
+        ingested_count = 0
+
+        def process_fn(item: Dict[str, Any], idx: int) -> None:
+            nonlocal ingested_count
+            count = _ingest_single_item_activity(
+                gh_client,
+                repo_name=item["repo_name"],
+                start_date=item["start_date"],
+                end_date=item["end_date"],
+                client=client,
+            )
+            ingested_count += count
+
+        delta_checkpoint_result = process_with_checkpoint(
+            task_id=delta_task_id,
+            items=delta_items,
+            process_fn=process_fn,
+            client=client,
+            interrupt_at_index=interrupt_at_index,
+            stage=f"{stage}_delta",
+            use_cache=use_cache,
+            metadata={
+                "parent_task_id": task_id,
+                "repo_names": sorted(new_repos),
+                "total_repos": len(new_repos),
+                "total_periods": len(period_chunks),
+                "username": gh_client.username,
+                "is_delta": True,
+            },
+        )
+
+        if delta_checkpoint_result["status"] == "completed":
+            all_repos = sorted(list(stored_set | set(new_repos)))
+            existing.metadata["repo_names"] = all_repos
+            existing.metadata["total_repos"] = len(all_repos)
+            existing.updated_at = datetime.now(timezone.utc).isoformat()
+            write_checkpoint(existing, client=client)
+
+        return {
+            "status": delta_checkpoint_result["status"],
+            "task_id": task_id,
+            "is_delta": True,
+            "delta_task_id": delta_task_id,
+            "new_repos": new_repos,
+            "completed_items_count": delta_checkpoint_result["completed_items_count"],
+            "total_items": len(delta_items),
+            "repo_names": repo_names,
+            "period_chunks_count": len(period_chunks),
+            "processed_indices": delta_checkpoint_result["processed_indices"],
+            "resumed_from_index": delta_checkpoint_result.get("resumed_from_index"),
+            "activities_count": ingested_count,
+        }
+
+    # Normal backfill (first run or resuming an in-progress parent task)
+    items = build_backfill_work_items(repo_names, period_chunks)
     ingested_count = 0
 
     def process_fn(item: Dict[str, Any], idx: int) -> None:
@@ -600,6 +723,7 @@ def backfill_full_github_activity(
         stage=stage,
         use_cache=use_cache,
         metadata={
+            "repo_names": sorted(repo_names),
             "total_repos": len(repo_names),
             "total_periods": len(period_chunks),
             "username": gh_client.username,
@@ -609,6 +733,7 @@ def backfill_full_github_activity(
     return {
         "status": checkpoint_result["status"],
         "task_id": task_id,
+        "is_delta": False,
         "completed_items_count": checkpoint_result["completed_items_count"],
         "total_items": len(items),
         "repo_names": repo_names,
