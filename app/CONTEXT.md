@@ -41,6 +41,14 @@ All Milestones 1–10 are DONE:
 - Milestone 9: Migrated all record kinds to real, visible custom Fulcra data types (`fulcra_types.py`)
 - Milestone 10: Private repository discovery fix in `GitHubClient` (`github_client.py`)
 
+Milestone 11 (stale-checkpoint-masks-improved-discovery fix) is next --
+see plan.md and the Decisions Log entry below. A second real fresh
+account (`gklei`) test found that Milestone 10's fix, while correct in
+isolation, is unreachable in practice because a stale "completed"
+checkpoint from an earlier, narrower discovery pass silently
+short-circuits any later backfill for the same username+date-range,
+even when discovery logic has since improved.
+
 The project is fully packaged, tested, and ready for execution by fresh agents or human users.
 
 ## Fulcra SDK usage notes (verified against the real API, not assumed)
@@ -187,6 +195,67 @@ yet started. Consult both, but don't duplicate one into the other.
 ## Decisions Log
 (Newest at the top. One entry per meaningful decision — not a full
 chronological journal, just high-signal architectural notes.)
+
+- **(Real gap found via a SECOND fresh-account live test, not yet
+  fixed -- Milestone 11 scoped for it)** A second real fresh-account
+  test (GitHub user `gklei`, ~90+ private repos, large private
+  `fulcradynamics/*` org footprint) found that Milestone 10's private-
+  repo discovery fix, while independently confirmed correct in
+  isolation (`enumerate_repositories()` genuinely returns 116 repos
+  including private ones for this account), is UNREACHABLE via the
+  documented `backfill` CLI path in practice. Root cause: the checkpoint
+  layer's `task_id` (`f"backfill_3yr:{username}:{start_str}_{end_str}"`
+  in `github_activity.backfill_full_github_activity`) depends only on
+  username + date range, never on which repos were actually discovered.
+  `checkpoint.process_with_checkpoint` trusts `existing.status ==
+  "completed"` unconditionally and returns immediately with zero new
+  work -- so an EARLIER backfill attempt for this exact username+range
+  that discovered only 6 repos (likely run before/without Milestone
+  10's fix) left a `"completed"` checkpoint that every SUBSEQUENT
+  backfill attempt -- including one using the already-fixed
+  116-repo-discovering code -- silently trusts and skips, with no
+  warning that the "completed" result only ever covered a fraction of
+  the real repo set. The CLI's own success output ("Backfill completed
+  successfully!") gives no indication anything was skipped.
+  **Confirmed by the reporting agent (not just theorized):** GitHub PAT
+  scopes (`read:org, repo`) were confirmed sufficient for private repo
+  access; `GET /user/repos?...` confirmed 94+ private repos visible
+  directly; this repo's own `enumerate_repositories()` confirmed to
+  return 116 repos for the real 3-year window; and
+  `checkpoint.list_checkpoints()`/`read_checkpoint()` confirmed the
+  existing `backfill_3yr:gklei:...` checkpoint's stored metadata shows
+  `total_repos: 6`, `status: "completed"`.
+  **Why this is a design smell, not a one-off stale-cache accident:**
+  `write_raw_activities` has NO deduplication by `activity_id` -- it's a
+  pure append. This means the naive fix ("just ignore `completed` and
+  reprocess everything") would create real duplicate
+  `GitHubActivityRaw` records (and downstream double-counted rollups/
+  notability signals) for the repos already covered by the old
+  checkpoint, not just safely fill in the gap. A correct fix must be
+  delta-aware: detect which repos are newly discoverable that the old
+  checkpoint's repo set didn't cover, and process ONLY those as a
+  distinct, separately-tracked unit of work -- never blindly
+  reprocessing repos the old checkpoint already covered.
+  **Planned fix direction (Milestone 11, not yet implemented):**
+  (1) store the actual discovered `repo_names` list (not just a count)
+  in checkpoint metadata, so a future run can compute a real set
+  difference, not just notice a changed count; (2) before trusting an
+  existing `"completed"` checkpoint in
+  `backfill_full_github_activity`/`process_with_checkpoint`, compare a
+  freshly discovered repo set against the checkpoint's stored repo
+  list; if the fresh set has repos the old checkpoint didn't cover, run
+  a distinctly-tracked delta backfill for exactly those new repos (own
+  task_id, e.g. incorporating a hash of the new-repo subset) rather than
+  reprocessing the full item list; (3) surface this to the user/CLI
+  output (e.g. "found N new repos not covered by a prior backfill,
+  ingesting those now") rather than silently completing with a subset;
+  (4) add a real live integration test exercising this exact scenario
+  end-to-end through `backfill_full_github_activity` (a real narrow
+  backfill, marked completed, then a real second call with an expanded
+  real repo set, asserting the new repo's real activity gets ingested
+  and the original repo's activity count does NOT change/duplicate) --
+  not just a unit test of `enumerate_repositories()` in isolation, since
+  that already passed and didn't catch this.
 
 - **(Milestone 10 complete)** Fixed private repository discovery gap in
   `GitHubClient.list_accessible_repositories()` and `enumerate_repositories()`.
