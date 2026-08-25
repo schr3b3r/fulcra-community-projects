@@ -61,7 +61,56 @@ these rules exist, not just what they are.
   `NumericAnnotation`, custom types via `create_annotation`/
   `record_data_type`) to make application state queryable, rather than
   relying on directory scanning or implicit file state to answer "what
-  has happened / what is the current state."
+  has happened / what is the current state.
+- **`recorded_at` must reflect real event/period time, never ingestion
+  time.** Every record has a `recorded_at` field, and it is tempting to
+  default it to "now" (when the record happens to be written) since
+  that's often the only timestamp trivially at hand at the write call
+  site. Resist this default whenever the data being recorded describes
+  something that happened at a different, real historical
+  moment — a source event's own timestamp, a period's start date, a
+  measurement's actual time. Fulcra's query surface is fundamentally
+  time-range-based (`moment_annotations(start_time, end_time, ...)`,
+  and the CLI's `get-records <TYPE> "<TIME_WINDOW>"` convention); a
+  `recorded_at` that reflects ingestion time instead of real event time
+  makes genuinely time-scoped queries return nothing even though the
+  data exists, silently defeating the entire reason for using Fulcra's
+  durable, time-queryable storage rather than an arbitrary blob store.
+  If a batch of historical/backfilled data is being ingested, its
+  records' `recorded_at` values should be spread across the real
+  historical range they represent, not clustered at the moment the
+  ingestion script happened to run. Keep true ingestion/last-write time
+  in a separate field (e.g. inside a JSON `note` payload, or a distinct
+  `updated_at`-style field) if it's worth preserving — don't conflate
+  it with `recorded_at`.
+- **Prefer real Fulcra tags for cross-cutting, filterable dimensions
+  over embedding them only inside a JSON `note` payload.** If a record
+  has a field a consumer would plausibly want to filter or group by
+  (a category, a type, a status flag, an author, a project/repo name),
+  create/resolve it as a real Fulcra tag
+  (`client.create_tags(list[str])` — idempotent, safe to call
+  repeatedly) and attach the resolved tag UUID(s) to the record's
+  `tags` array, rather than leaving it only as a key inside the note
+  JSON blob. A field trapped in an opaque JSON string is invisible to
+  anyone using the Fulcra API directly (not through this specific
+  application) without first fetching every record and parsing it
+  themselves; a real tag is filterable by anyone, including the record
+  owner inspecting their own data through Context Web, the CLI, or a
+  different agent entirely. Resolve tag UUIDs ONCE per distinct value
+  per run (cache them — the same idempotent-lookup-then-cache pattern
+  already used for custom data type UUIDs), not once per record, since
+  tag creation/lookup is a real API call.
+- **Use the `sources` chain for real lineage, not just type identity.**
+  If a project is already attaching a single source tag purely to
+  distinguish one custom data type's records from another's, consider
+  whether the `sources` array should carry more of the record's real
+  provenance chain (origin system -> intermediate artifact/context ->
+  producing agent), ordered origin-to-destination, with the type-
+  identity tag as the final element. This makes a record's lineage
+  inspectable without parsing its note payload, and lets a later agent
+  distinguish raw/ingested data from derived/computed data (the
+  "Derived Context" pattern above) directly from `sources` rather than
+  needing app-specific knowledge of what the JSON note structure means.
 - **Resumable Discovery:** if this app has any kind of polling/background
   loop that should pick up "what changed since last time," maintain an
   explicit durable progress marker (in Fulcra, not a local file) rather
