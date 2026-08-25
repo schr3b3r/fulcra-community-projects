@@ -11,7 +11,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 
 from fulcra_api.core import FulcraAPI
 from fulcra_client import get_fulcra_client
-from fulcra_types import get_custom_source_tag
+from fulcra_types import get_custom_source_tag, get_or_create_tag_uuids
 from checkpoint import (
     process_with_checkpoint,
     read_checkpoint,
@@ -103,18 +103,33 @@ class GitHubActivityRaw:
             id=record_id,
         )
 
-    def to_fulcra_record(self, source_tag: Optional[str] = None) -> Dict[str, Any]:
+    def to_fulcra_record(
+        self,
+        source_tag: Optional[str] = None,
+        tag_ids: Optional[List[str]] = None,
+        sources: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         """Format into a Fulcra MomentAnnotation record dict."""
         record_id = self.id or compute_deterministic_activity_id(
             self.activity_type, self.activity_id, self.repo_name
         )
-        rec = {
+        rec: Dict[str, Any] = {
             "id": record_id,
             "recorded_at": _format_iso_timestamp(self.timestamp),
             "note": json.dumps(self.to_dict()),
         }
-        if source_tag:
-            rec["sources"] = [source_tag]
+        if tag_ids:
+            rec["tags"] = tag_ids
+
+        if sources:
+            rec["sources"] = sources
+        elif source_tag:
+            repo_dots = self.repo_name.replace("/", ".")
+            rec["sources"] = [
+                "com.github",
+                f"com.github.repo.{repo_dots}",
+                source_tag,
+            ]
         return rec
 
 
@@ -138,12 +153,32 @@ def write_raw_activities(
         client = get_fulcra_client()
 
     source_tag = get_custom_source_tag(RAW_RECORD_TYPE, client=client)
+
+    # Collect distinct tag names for repo_name and activity_type
+    all_tag_names: List[str] = []
+    for act in activities:
+        if act.repo_name:
+            all_tag_names.append(act.repo_name)
+        if act.activity_type:
+            all_tag_names.append(act.activity_type)
+
+    tag_map = get_or_create_tag_uuids(all_tag_names, client=client)
+
     now_iso = datetime.now(timezone.utc).isoformat()
     records = []
     for act in activities:
         if not act.updated_at:
             act.updated_at = now_iso
-        records.append(act.to_fulcra_record(source_tag=source_tag))
+
+        act_tag_ids = []
+        if act.repo_name in tag_map:
+            act_tag_ids.append(tag_map[act.repo_name])
+        if act.activity_type in tag_map:
+            act_tag_ids.append(tag_map[act.activity_type])
+
+        records.append(
+            act.to_fulcra_record(source_tag=source_tag, tag_ids=act_tag_ids)
+        )
 
     # Batch write in chunks of 50
     batch_size = 50

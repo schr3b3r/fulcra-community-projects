@@ -20,6 +20,7 @@ status changes.
 | [11_stale_checkpoint_masking_fix.md](11_stale_checkpoint_masking_fix.md) | done | Delta-aware backfill: detects repos not covered by a prior completed checkpoint and ingests only those, without reprocessing/duplicating already-covered repos |
 | [12_skip_repos_no_activity.md](12_skip_repos_no_activity.md) | done | Skips repos with zero author-scoped activity across the full requested range before per-chunk ingestion, via a one-time-per-repo `has_author_activity` pre-check |
 | [13_recorded_at_real_event_time.md](13_recorded_at_real_event_time.md) | done | `recorded_at` reflects real historical event/period time across all writers, not ingestion time; deterministic IDs fix a raw-activity dedup gap |
+| [14_tags_and_source_chains.md](14_tags_and_source_chains.md) | done | Real Fulcra tags for repo_name/activity_type/period_type/notability flags, and deeper source-chain lineage marking derived vs. raw data |
 
 ## Status values
 - `not_started` — described but no work done yet.

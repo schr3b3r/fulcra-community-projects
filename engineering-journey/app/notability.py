@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 
 from fulcra_api.core import FulcraAPI
 from fulcra_client import get_fulcra_client
-from fulcra_types import get_custom_source_tag
+from fulcra_types import get_custom_source_tag, get_or_create_tag_uuids
 from checkpoint import process_with_checkpoint, _fetch_annotations_merged
 from rollup import ActivityRollup, read_rollups
 
@@ -95,14 +95,28 @@ class NotabilitySignal:
             id=record_id,
         )
 
-    def to_fulcra_record(self, source_tag: Optional[str] = None) -> Dict[str, Any]:
+    def to_fulcra_record(
+        self,
+        source_tag: Optional[str] = None,
+        tag_ids: Optional[List[str]] = None,
+        sources: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         """Format into a Fulcra MomentAnnotation record dict."""
-        rec = {
+        rec: Dict[str, Any] = {
             "recorded_at": _format_iso_timestamp(self.start_date),
             "note": json.dumps(self.to_dict()),
         }
-        if source_tag:
-            rec["sources"] = [source_tag]
+        if tag_ids:
+            rec["tags"] = tag_ids
+
+        if sources:
+            rec["sources"] = sources
+        elif source_tag:
+            rec["sources"] = [
+                "com.github",
+                "agent.engineering-journey.notability",
+                source_tag,
+            ]
         return rec
 
 
@@ -126,12 +140,30 @@ def write_notability_signals(
         client = get_fulcra_client()
 
     source_tag = get_custom_source_tag(NOTABILITY_RECORD_TYPE, client=client)
+
+    all_tag_names: List[str] = []
+    for s in signals:
+        if s.period_type:
+            all_tag_names.append(s.period_type)
+        if s.flags:
+            all_tag_names.extend(s.flags)
+
+    tag_map = get_or_create_tag_uuids(all_tag_names, client=client)
+
     now_iso = datetime.now(timezone.utc).isoformat()
     records = []
     for s in signals:
         if not s.updated_at:
             s.updated_at = now_iso
-        records.append(s.to_fulcra_record(source_tag=source_tag))
+
+        s_tag_names = []
+        if s.period_type:
+            s_tag_names.append(s.period_type)
+        if s.flags:
+            s_tag_names.extend(s.flags)
+
+        s_tag_ids = [tag_map[tn] for tn in s_tag_names if tn in tag_map]
+        records.append(s.to_fulcra_record(source_tag=source_tag, tag_ids=s_tag_ids))
 
     batch_size = 50
     for i in range(0, len(records), batch_size):
