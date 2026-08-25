@@ -36,6 +36,13 @@ def main():
     result = git_commit("Smoke test: gate fail-open (no tests exist)")
     print(result)
     assert result.startswith("Committed as"), f"Expected commit to succeed: {result}"
+    # This starter kit's own repo has no app/fulcra_client.py (that file
+    # only exists in a SCAFFOLDED project) -- the Fulcra backup step must
+    # skip gracefully in that case, not raise, and must say so rather than
+    # silently doing nothing.
+    assert "[fulcra-backup]" in result, (
+        f"Expected a fulcra-backup status line in the commit result: {result}"
+    )
 
     print("\n--- Test 2: add a FAILING test -> gate fails CLOSED, commit refused ---")
     write_file("tests/test_gate_smoke.py", "def test_this_fails():\n    assert False\n")

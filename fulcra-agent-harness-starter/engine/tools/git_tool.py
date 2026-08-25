@@ -31,9 +31,41 @@ If no test suite exists yet (e.g. app/tests/ has no test files), the gate
 fails OPEN: there's nothing to regress yet, so commits are allowed. The
 moment any test file exists, the gate becomes active for every future
 commit.
+
+Fulcra backup (git_commit): after every successful commit, this tool ALSO
+bundles the full local git history (`git bundle create --all`) and uploads
+it to the user's own Fulcra file store, at
+`/harness-projects/<repo-dir-name>.bundle`. This is deliberately automatic,
+not a separate step a human or agent has to remember to run -- the exact
+same "make it structural, not a request" reasoning as the test gate above
+applies here: a system-prompt instruction to "back this up after
+committing" is only ever a request, and real usage has shown agents skip
+end-of-task steps like this when their iteration budget runs out right
+before the end of a task. This gives a project scaffolded by this starter
+kit real cross-session, cross-machine continuity WITHOUT requiring a
+GitHub account or any other remote -- resuming on a totally fresh VM is
+just: authenticate to Fulcra (already required for the app itself),
+download one file, `git clone` it. See `fulcra-rapid-prototype`'s own
+"Resuming a Project" section for the same underlying pattern (this reuses
+it, just extended past that skill's own Intake/Interview/Architecture/Plan
+phases into the Build phase this harness is responsible for). A user who
+additionally wants a GitHub-hosted, PR-able copy of the repo can still add
+a GitHub remote on top of this at any time -- the two are not mutually
+exclusive, and this mechanism does not assume or require GitHub at all.
+
+The backup step is best-effort and NEVER blocks or fails a commit: if
+Fulcra credentials aren't configured, the upload fails, or anything else
+goes wrong, git_commit still returns success for the underlying commit
+(which already happened, is real, and should not be treated as failed
+because of an unrelated backup problem) -- it just includes a warning in
+the returned message so the human/agent can see something needs
+attention, without the whole workflow grinding to a halt over it.
 """
 
 import subprocess
+import tempfile
+from pathlib import Path
+from typing import Optional
 
 from harness.tools.filesystem import SANDBOX_ROOT
 
@@ -99,6 +131,68 @@ def _find_repo_root() -> "subprocess.CompletedProcess":
     )
 
 
+def _backup_repo_to_fulcra() -> Optional[str]:
+    """Bundle the full local git history and upload it to the user's Fulcra
+    file store, at /harness-projects/<repo-dir-name>.bundle.
+
+    Best-effort: returns None on success, or a short human-readable warning
+    string on any failure (missing credentials, upload error, etc.) -- this
+    function must NEVER raise, since a backup failure must never be allowed
+    to block or fail an otherwise-successful commit. Callers should surface
+    the returned warning to the user/agent, not silently swallow it.
+    """
+    try:
+        repo_root_result = _find_repo_root()
+        repo_root = Path(repo_root_result.stdout.strip())
+        repo_name = repo_root.name
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            bundle_path = Path(tmp_dir) / f"{repo_name}.bundle"
+            bundle_result = subprocess.run(
+                ["git", "bundle", "create", str(bundle_path), "--all"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+            )
+            if bundle_result.returncode != 0:
+                return (
+                    f"[fulcra-backup] Skipped: `git bundle create` failed: "
+                    f"{bundle_result.stderr.strip()}"
+                )
+
+            # Imported lazily so a harness with no app/fulcra_client.py yet
+            # (e.g. mid-scaffold, before Build has started) doesn't fail to
+            # import this whole module just because backup isn't possible yet.
+            try:
+                import sys
+
+                sys.path.insert(0, str(SANDBOX_ROOT))
+                from fulcra_client import FulcraAuthError, get_fulcra_client
+            except ImportError:
+                return (
+                    "[fulcra-backup] Skipped: app/fulcra_client.py not found yet "
+                    "(nothing to back up to without it)."
+                )
+
+            try:
+                client = get_fulcra_client()
+            except FulcraAuthError as exc:
+                return f"[fulcra-backup] Skipped: not authenticated to Fulcra ({exc})."
+
+            file_size = bundle_path.stat().st_size
+            with open(bundle_path, "rb") as f:
+                client.upload_file(
+                    data=f,
+                    file_type="application/octet-stream",
+                    file_size=file_size,
+                    filepath=f"/harness-projects/{repo_name}.bundle",
+                )
+
+        return None
+    except Exception as exc:
+        return f"[fulcra-backup] Skipped due to an unexpected error: {exc}"
+
+
 def git_diff() -> str:
     """Show uncommitted changes scoped to the app/ sandbox directory only.
 
@@ -126,12 +220,18 @@ def git_commit(message: str) -> str:
     exist under app/tests/) and refuses to commit if any test fails. This
     is a hard gate, not a suggestion — see the module docstring for why.
 
+    After a successful commit, also backs up the full local git history to
+    the user's Fulcra file store as a git bundle (see the module docstring's
+    "Fulcra backup" section) -- best-effort, never blocks the commit itself.
+
     Args:
         message: commit message. Required and must be non-empty.
 
     Returns:
         A short confirmation string including the new commit hash, or a
-        message indicating there was nothing to commit.
+        message indicating there was nothing to commit. If the Fulcra
+        backup step failed, a warning is appended to this string, but the
+        commit itself is still reported as successful.
 
     Raises:
         RuntimeError: if the test suite exists and fails, or if a git
@@ -192,7 +292,11 @@ def git_commit(message: str) -> str:
         check=True,
     )
     commit_hash = hash_result.stdout.strip()
-    return f"Committed as {commit_hash}: {message}"
+
+    backup_warning = _backup_repo_to_fulcra()
+    if backup_warning:
+        return f"Committed as {commit_hash}: {message}\n{backup_warning}"
+    return f"Committed as {commit_hash}: {message}\n[fulcra-backup] Uploaded full repo history to your Fulcra file store."
 
 
 # --- Schemas (Gemini function-calling format) ---------------------------
@@ -213,7 +317,10 @@ GIT_COMMIT_SCHEMA = {
         "directory only. Never touches files outside app/. Requires a "
         "descriptive commit message. If a test suite exists under "
         "app/tests/, this tool runs it first and REFUSES to commit if any "
-        "test fails — fix failing tests before calling this."
+        "test fails — fix failing tests before calling this. After a "
+        "successful commit, also backs up the full repo history to the "
+        "user's Fulcra file store as a git bundle (best-effort, never "
+        "blocks the commit)."
     ),
     "parameters": {
         "type": "object",

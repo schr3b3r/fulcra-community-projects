@@ -149,6 +149,43 @@ full flag description, including the constraint that history-preserving
 mode needs `--output-dir` to not exist yet at all (a `git clone`
 requirement, not something this script imposes).
 
+## Cross-session, cross-machine continuity during Build (no GitHub required)
+
+This continuity story doesn't stop at scaffolding. Every time the
+generated harness's `git_commit` tool successfully commits (during the
+Build phase, i.e. real task/milestone work), it automatically bundles
+the FULL local git history (`git bundle create --all`) and uploads it
+to the user's own Fulcra file store, at
+`/harness-projects/<project-dir-name>.bundle` — see
+`harness/tools/git_tool.py`'s module docstring for the implementation.
+This is deliberately automatic (built into the tool itself, not a
+separate step a system prompt asks the agent to remember), for the same
+reason the test gate is enforced structurally rather than requested: an
+agent running low on iteration budget right at the end of a task is
+exactly the agent most likely to skip an optional last step.
+
+The practical result: resuming a project on a genuinely fresh VM, with
+no shared filesystem and no assumption that GitHub (or any other
+hosting) is involved at all, is just:
+1. Authenticate to Fulcra (already required for the scaffolded app
+   itself to do anything real).
+2. Download `/harness-projects/<project-dir-name>.bundle`.
+3. `git clone` it.
+
+That's real continuity — full commit history, not just a snapshot —
+using only the same Fulcra account the project already needs, with
+zero dependency on a GitHub account, SSH key, or any other remote
+hosting decision. If a user separately wants a GitHub-hosted, PR-able
+copy of the project, they can add a GitHub remote at any time on top of
+this — the two aren't mutually exclusive, this mechanism just doesn't
+assume or require it as the default path.
+
+The backup step is best-effort and never blocks a commit: if Fulcra
+credentials aren't configured yet, or the upload fails for any reason,
+`git_commit` still reports the underlying commit as successful (it
+really happened) and just appends a warning noting the backup didn't
+happen this time.
+
 ## Known caveats
 
 - `harness/tools/test_git_commit_gate_smoke.py` (in a scaffolded project)
