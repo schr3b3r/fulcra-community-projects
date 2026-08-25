@@ -84,6 +84,47 @@ def test_notability_signal_recorded_at_reflects_historical_start_date():
     assert note["start_date"] == "2024-03-01"
 
 
+def test_notability_signal_to_fulcra_record_flag_tags():
+    """Verify to_fulcra_record attaches a tags array when tag_ids is passed --
+    this is the primary mechanism for making notability flags (e.g.
+    'focus_switch') genuinely queryable as real Fulcra tags rather than
+    only readable by parsing the JSON note payload."""
+    signal = NotabilitySignal(
+        period_type="week",
+        start_date="2026-06-01",
+        end_date="2026-06-07",
+        username="testuser",
+        notability_score=0.8,
+        flags=["focus_switch", "new_repo"],
+        explanation="Real focus switch detected.",
+    )
+
+    tag_ids = ["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"]
+    rec = signal.to_fulcra_record(tag_ids=tag_ids)
+
+    assert rec["tags"] == tag_ids
+
+
+def test_notability_signal_to_fulcra_record_source_chain_marks_derived_data():
+    """Verify to_fulcra_record's default sources chain marks this as
+    DERIVED/computed data (distinct from raw ingested GitHub content),
+    with the custom-type identity tag as the last element."""
+    signal = NotabilitySignal(
+        period_type="week",
+        start_date="2026-06-01",
+        end_date="2026-06-07",
+        username="testuser",
+        notability_score=0.5,
+        flags=[],
+    )
+
+    identity_tag = "com.fulcradynamics.annotation.some-uuid"
+    rec = signal.to_fulcra_record(source_tag=identity_tag)
+
+    assert rec["sources"][-1] == identity_tag
+    assert "agent.engineering-journey.notability" in rec["sources"]
+
+
 def test_write_and_read_notability_signals():
     client = get_fulcra_client()
     test_user = f"testuser_{uuid.uuid4().hex[:6]}"

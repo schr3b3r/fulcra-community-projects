@@ -50,6 +50,10 @@ All Milestones 1–11 are DONE:
   never ingestion time, across all three record writers; deterministic
   IDs for `GitHubActivityRaw` fix a previously-documented dedup gap
   (`github_activity.py`, `rollup.py`, `notability.py`)
+- Milestone 15: real Fulcra tags for repo_name/activity_type/period_type/
+  notability flags, and deeper source-chain lineage marking derived vs.
+  raw data (`fulcra_types.py`'s `get_or_create_tag_uuids`,
+  `github_activity.py`, `rollup.py`, `notability.py`)
 
 The project is fully packaged, tested, and ready for execution by fresh agents or human users.
 
@@ -76,6 +80,19 @@ the "obvious" call signature from a method name.
   storing it in Fulcra rather than an arbitrary blob store. See
   Milestone 14's Decisions Log entry for the concrete bug this was
   fixed from and how it was verified.
+
+- **Tag resolution (real Fulcra tags, not just JSON note fields):** use
+  `fulcra_types.get_or_create_tag_uuids(tag_names, client)` to resolve a
+  batch of tag names to real UUIDs via `client.create_tags()`
+  (idempotent -- confirmed a repeat call for an already-existing name
+  returns the same UUID, no duplicate created). Resolve ONCE per
+  distinct value per batch write call (the function caches results in
+  a process-local dict, mirroring the custom-data-type UUID cache
+  pattern) -- never resolve inside a per-record loop, since tag
+  lookup/creation is a real API call. See Milestone 15's Decisions Log
+  entry for the concrete before/after query value this unlocks (e.g.
+  filtering `NotabilitySignal`s by a `focus_switch` tag instead of
+  fetching everything and parsing JSON).
 
 - **Auth**: use `app/fulcra_client.py`'s `get_fulcra_client()` — do not
   file is ever missing: the correct sequence is
@@ -213,6 +230,71 @@ yet started. Consult both, but don't duplicate one into the other.
 ## Decisions Log
 (Newest at the top. One entry per meaningful decision — not a full
 chronological journal, just high-signal architectural notes.)
+
+- **(Milestone 15 complete)** Added real Fulcra tag usage and deeper
+  source-chain lineage, fixing a gap flagged directly by a user
+  reviewing this project's Fulcra usage: this project had NEVER used
+  the tag primitive (confirmed via grep -- zero calls to
+  `client.tags()`/`create_tag()`/`create_tags()` anywhere in app/)
+  despite having several obvious filterable dimensions already sitting
+  unused inside every record's JSON `note` payload -- `repo_name`,
+  `activity_type` (`GitHubActivityRaw`), `period_type`
+  (`ActivityRollup`/`NotabilitySignal`), and `flags`
+  (`NotabilitySignal`'s `high_volume`/`new_repo`/`focus_switch`/
+  `streak`). None of these were filterable via the Fulcra API directly
+  without first fetching every record and parsing JSON. Separately,
+  every record's `sources` array was always exactly one element (the
+  custom-type identity tag used purely for read filtering by
+  `_fetch_annotations_merged`), never encoding real provenance the way
+  the `fulcra-ingest` skill's documented convention does (origin
+  service -> intermediate artifact/context -> agent).
+  **Fix:** added `fulcra_types.get_or_create_tag_uuids(tag_names,
+  client)`, resolving a list of tag names to real Fulcra tag UUIDs via
+  `client.create_tags()` (confirmed idempotent per the SDK's own
+  docstring) and caching results in a process-local `_TAG_UUID_CACHE`
+  -- same shape as the existing custom-data-type UUID cache. Wired into
+  all three writers: `GitHubActivityRaw.to_fulcra_record()` now accepts
+  `tag_ids`/`sources`, with `write_raw_activities` resolving
+  `repo_name`/`activity_type` tags once per batch write call (not per
+  record) and defaulting `sources` to `["com.github",
+  "com.github.repo.<repo with '/' -> '.'>", <identity tag>]`.
+  `ActivityRollup`/`NotabilitySignal.to_fulcra_record()` got the same
+  treatment: `write_rollups` resolves `period_type` tags,
+  `write_notability_signals` resolves `period_type` PLUS every flag in
+  each signal's `flags` list (the highest-value case -- turns "find
+  every notable focus-switch moment across a 3-year journey" from
+  "read every signal and parse JSON" into a single tag-filtered query),
+  defaulting `sources` to `["com.github",
+  "agent.engineering-journey.<rollup|notability>", <identity tag>]` to
+  explicitly mark these as DERIVED/computed data, not raw ingested
+  content -- the "Derived Context" pattern. In every case the
+  custom-type identity tag is preserved as the LAST element of
+  `sources`, since `_fetch_annotations_merged`'s `source=` filtering
+  depends on it.
+  Honest trade-off, not sold as free: resolving N distinct tag values
+  costs N-ish `create_tags`/`tags()` API calls per run (once, cached) --
+  cheap relative to per-item backfill work, but a genuinely new
+  consideration; no prior milestone touched tags at all.
+  **Verified:** the harness run itself hit the 30-iteration cap after
+  writing real, working code across `fulcra_types.py`,
+  `github_activity.py`, `rollup.py`, `notability.py` but before adding
+  ANY new tests or doc updates -- more than the usual overrun (Milestones
+  8/9/11/13/14 hit the cap after tests were written; this one hit it
+  before). Completed manually: added 10 new tests across
+  `test_fulcra_types.py` (mocked tag resolution: single-batch-call
+  behavior, dedup/caching across calls, empty-input short-circuit, plus
+  one real live test proving actual tag UUID resolution and idempotency
+  against this environment's real Fulcra account),
+  `test_github_activity.py`, `test_notability.py`, and `test_rollup.py`
+  (mocked `to_fulcra_record()` tags/sources assertions per record
+  kind, including the identity-tag-stays-last invariant), added this
+  Decisions Log entry, the `features/INDEX.md` row, and
+  `features/14_tags_and_source_chains.md`. Full mocked suite (`pytest
+  -k "not real"`) reran clean: 65 passed (up from 54 pre-existing).
+  **Process note:** the codebase changes were run through
+  `harness.run_task`; the tests/docs/commit were completed by hand
+  through the harness's own `git_tool.git_commit` gate, matching the
+  established pattern from prior overrun milestones.
 
 - **(Milestone 14 complete)** Fixed a real, foundational correctness bug
   flagged directly by a user: every writer in this project set the

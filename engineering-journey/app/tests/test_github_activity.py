@@ -111,6 +111,83 @@ def test_deterministic_activity_id_helper():
     assert id1 != id4
 
 
+def test_github_activity_to_fulcra_record_includes_tag_ids():
+    """Verify to_fulcra_record attaches a tags array when tag_ids is passed."""
+    act = GitHubActivityRaw(
+        activity_type="commit",
+        activity_id="sha_tag_test",
+        repo_name="owner/repo",
+        username="testuser",
+        timestamp="2026-01-01T00:00:00Z",
+        title_or_summary="test commit",
+    )
+
+    tag_ids = ["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"]
+    rec = act.to_fulcra_record(tag_ids=tag_ids)
+
+    assert rec["tags"] == tag_ids
+
+
+def test_github_activity_to_fulcra_record_no_tags_when_omitted():
+    """Verify to_fulcra_record does not add a tags key when tag_ids is not passed."""
+    act = GitHubActivityRaw(
+        activity_type="commit",
+        activity_id="sha_no_tag_test",
+        repo_name="owner/repo",
+        username="testuser",
+        timestamp="2026-01-01T00:00:00Z",
+        title_or_summary="test commit",
+    )
+
+    rec = act.to_fulcra_record()
+
+    assert "tags" not in rec
+
+
+def test_github_activity_to_fulcra_record_source_chain_includes_repo_lineage():
+    """Verify to_fulcra_record's sources chain includes real repo-level lineage
+    (com.github -> com.github.repo.<repo> -> the custom-type identity tag last),
+    not just the bare custom-type identity tag."""
+    act = GitHubActivityRaw(
+        activity_type="commit",
+        activity_id="sha_source_test",
+        repo_name="owner/my-repo",
+        username="testuser",
+        timestamp="2026-01-01T00:00:00Z",
+        title_or_summary="test commit",
+    )
+
+    identity_tag = "com.fulcradynamics.annotation.some-uuid"
+    rec = act.to_fulcra_record(source_tag=identity_tag)
+
+    assert rec["sources"] == [
+        "com.github",
+        "com.github.repo.owner.my-repo",
+        identity_tag,
+    ]
+    # The custom-type identity tag must remain the LAST element -- this is
+    # what _fetch_annotations_merged's source= filtering depends on.
+    assert rec["sources"][-1] == identity_tag
+
+
+def test_github_activity_to_fulcra_record_explicit_sources_override():
+    """Verify an explicitly-passed sources list takes precedence over the
+    auto-derived repo-lineage chain."""
+    act = GitHubActivityRaw(
+        activity_type="commit",
+        activity_id="sha_override_test",
+        repo_name="owner/repo",
+        username="testuser",
+        timestamp="2026-01-01T00:00:00Z",
+        title_or_summary="test commit",
+    )
+
+    custom_sources = ["custom.source.a", "custom.source.b"]
+    rec = act.to_fulcra_record(source_tag="ignored-tag", sources=custom_sources)
+
+    assert rec["sources"] == custom_sources
+
+
 def test_historical_recorded_at_time_range_query_real():
     """Real live API test: write a record with historical timestamp and prove it is discoverable
     via a time-range query for that historical period, but excluded from non-overlapping periods."""

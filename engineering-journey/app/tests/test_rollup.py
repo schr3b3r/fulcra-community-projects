@@ -87,6 +87,42 @@ def test_activity_rollup_recorded_at_reflects_historical_start_date():
     assert note["start_date"] == "2024-03-01"
 
 
+def test_activity_rollup_to_fulcra_record_period_type_tag():
+    """Verify to_fulcra_record attaches a tags array when tag_ids is passed,
+    the mechanism for making period_type genuinely queryable ("all week
+    rollups") as a real Fulcra tag rather than only via note JSON parsing."""
+    rollup = ActivityRollup(
+        period_type="week",
+        start_date="2026-06-01",
+        end_date="2026-06-07",
+        username="testuser",
+        summary="Test summary.",
+    )
+
+    tag_ids = ["11111111-1111-1111-1111-111111111111"]
+    rec = rollup.to_fulcra_record(tag_ids=tag_ids)
+
+    assert rec["tags"] == tag_ids
+
+
+def test_activity_rollup_to_fulcra_record_source_chain_marks_derived_data():
+    """Verify to_fulcra_record's default sources chain marks this as
+    DERIVED/computed data, with the custom-type identity tag last."""
+    rollup = ActivityRollup(
+        period_type="week",
+        start_date="2026-06-01",
+        end_date="2026-06-07",
+        username="testuser",
+        summary="Test summary.",
+    )
+
+    identity_tag = "com.fulcradynamics.annotation.some-uuid"
+    rec = rollup.to_fulcra_record(source_tag=identity_tag)
+
+    assert rec["sources"][-1] == identity_tag
+    assert "agent.engineering-journey.rollup" in rec["sources"]
+
+
 def test_write_and_read_rollups():
     client = get_fulcra_client()
     test_user = f"testuser_{uuid.uuid4().hex[:6]}"
