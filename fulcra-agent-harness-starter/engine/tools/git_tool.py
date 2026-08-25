@@ -45,7 +45,7 @@ before the end of a task. This gives a project scaffolded by this starter
 kit real cross-session, cross-machine continuity WITHOUT requiring a
 GitHub account or any other remote -- resuming on a totally fresh VM is
 just: authenticate to Fulcra (already required for the app itself),
-download one file, `git clone` it. See `fulcra-rapid-prototype`'s own
+download one file, `git clone` it. See `fulcra-prototype-grill-me`'s own
 "Resuming a Project" section for the same underlying pattern (this reuses
 it, just extended past that skill's own Intake/Interview/Architecture/Plan
 phases into the Build phase this harness is responsible for). A user who

@@ -75,5 +75,5 @@ regardless of the specific project:
   is truly throwaway/session-local as fine to keep off Fulcra (ephemeral).
   When in doubt, prefer durability — see the "Context-Compute Separation"
   and "Derived Context" patterns in the project's architecture notes
-  (produced during the fulcra-rapid-prototype Architecture phase) for the
+  (produced during the fulcra-prototype-grill-me Architecture phase) for the
   reasoning behind this.
