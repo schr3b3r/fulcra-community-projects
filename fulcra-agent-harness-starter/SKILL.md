@@ -42,10 +42,19 @@ backend).
   `fulcradynamics/community-skills` repo). This skill depends on it for
   the Intake/Interview/Architecture/Plan phases — it does not duplicate
   that requirements-gathering logic.
-- A Gemini API key (the generated harness uses `google-genai` — see
-  `engine/providers/gemini.py`'s docstring if you want to swap providers
-  later; that's a deliberate extension point, not a limitation to work
-  around here).
+- A Gemini API key will be needed eventually (the generated harness
+  uses `google-genai` — see `engine/providers/gemini.py`'s docstring
+  if you want to swap providers later; that's a deliberate extension
+  point, not a limitation to work around here), but **do not ask the
+  user for it now.** None of Intake, Interview, Architecture, or Plan
+  need it -- those phases are pure conversation/document work with no
+  model calls of their own. Only ask for the key at Step 5, right
+  before it's actually needed to run the harness for the first time --
+  asking for it up front is unnecessary friction before the user even
+  knows what they're building, and (worse) an unused credential sitting
+  around from step 1 is one more thing that can go stale, get
+  forgotten, or get asked for again redundantly if the session breaks
+  and resumes later.
 
 ## The flow (follow these steps in order)
 
@@ -137,7 +146,11 @@ or pick a fresh path.
 ### 5. Verify the scaffold actually works before handing off
 Do NOT just report "scaffolding complete" once the script exits — that is
 exactly the kind of unverified claim this project's own engineering
-standards exist to prevent. Actually run:
+standards exist to prevent. Before running any of the commands below,
+**explicitly ask the user for a Gemini API key now** (this is the first
+point in the whole flow it's actually needed -- see Prerequisites above
+for why it's deliberately not asked for any earlier) and write it into
+the new project's `.env` yourself once given:
 ```bash
 cd <new project dir>
 git log --oneline   # if history was preserved, confirm the real
@@ -149,7 +162,11 @@ git add -A && git commit -m "Scaffold harness + app"   # or "git init &&
                      # in that case) -- the script's own final output
                      # tells you which applies
 python -m venv .venv && .venv/bin/pip install -e .
-cp .env.example .env   # fill in GEMINI_API_KEY
+cp .env.example .env   # then write the user's actual Gemini API key
+                        # into GEMINI_API_KEY yourself -- don't just
+                        # tell the user to go edit the file by hand,
+                        # since you already have the key from asking
+                        # them a moment ago
 .venv/bin/python -m harness.test_loop_smoke
 .venv/bin/python -m harness.test_context_smoke
 .venv/bin/python -m harness.tools.test_filesystem_smoke
