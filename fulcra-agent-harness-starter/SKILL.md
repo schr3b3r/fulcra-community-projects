@@ -1,6 +1,6 @@
 ---
 name: fulcra-agent-harness-starter
-description: "Scaffolds a hand-rolled agent harness (control loop + sandboxed tools + provider adapter) for a new project built on Fulcra, using fulcra-rapid-prototype's Intake/Interview/Architecture/Plan phases to gather requirements before generating the harness. Trigger when the user wants to build something new on Fulcra with a custom agentic build loop, rather than using Hermes/Claude Code directly."
+description: "Scaffolds a hand-rolled agent harness (control loop + sandboxed tools + provider adapter) for a new project built on Fulcra, using fulcra-prototype-grill-me's Intake/Interview/Architecture/Plan phases to gather requirements before generating the harness. Trigger when the user wants to build something new on Fulcra with a custom agentic build loop, rather than using Hermes/Claude Code directly."
 author: schr3b3r
 version: 1.0.0
 metadata:
@@ -38,7 +38,7 @@ generated harness's ENGINEERING_STANDARDS.md assumes Fulcra as the data
 backend).
 
 ## Prerequisites
-- The `fulcra-rapid-prototype` skill must be available (it lives in the
+- The `fulcra-prototype-grill-me` skill must be available (it lives in the
   `fulcradynamics/community-skills` repo). This skill depends on it for
   the Intake/Interview/Architecture/Plan phases — it does not duplicate
   that requirements-gathering logic.
@@ -58,8 +58,8 @@ backend).
 
 ## The flow (follow these steps in order)
 
-### 1. Run fulcra-rapid-prototype through its Plan phase
-Load `fulcra-rapid-prototype` and run its Intake -> Interview ->
+### 1. Run fulcra-prototype-grill-me through its Plan phase
+Load `fulcra-prototype-grill-me` and run its Intake -> Interview ->
 Architecture -> Plan phases with the user, exactly as that skill
 specifies (including its Architecture user gate — do not skip it). Stop
 before that skill's own Prototype/Build phases: this starter kit's
@@ -117,18 +117,18 @@ outcome, not a failure, since not every project has an obvious domain
 library set worth calling out this early.
 
 **Git history:** by default (`--history=auto`) this script PRESERVES
-fulcra-rapid-prototype's real phase-by-phase commit history — if
+fulcra-prototype-grill-me's real phase-by-phase commit history — if
 `--rapid-prototype-dir` is a git working tree (the normal case, since
 that skill commits after every phase), the new project is created by
 cloning it, so a future session can `git log` the new project and see
 the actual Intake/Interview/Architecture/Plan commits, not just their
 content flattened into one commit. This matters for the same reason
-fulcra-rapid-prototype uses `git bundle` for cross-session continuity in
+fulcra-prototype-grill-me uses `git bundle` for cross-session continuity in
 the first place — don't throw that continuity away at the exact moment
 the project graduates to its own repo.
 
 If the user has a `.bundle` backup instead of a live checkout, unpack it
-first (`git clone <bundle> <dir>`, per fulcra-rapid-prototype's own
+first (`git clone <bundle> <dir>`, per fulcra-prototype-grill-me's own
 "Resuming a Project" instructions) and point `--rapid-prototype-dir` at
 the unpacked directory. If `--rapid-prototype-dir` isn't a git repo at
 all, this script automatically falls back to flattening (equivalent to
@@ -201,7 +201,7 @@ task_001_*.md`) if the user wants to see it in action immediately, or
 stop here and let the user run it themselves.
 
 ## What this skill deliberately does NOT do
-- It does not gather requirements itself — that's `fulcra-rapid-prototype`'s
+- It does not gather requirements itself — that's `fulcra-prototype-grill-me`'s
   job, reused rather than duplicated.
 - It does not run the generated harness's Build phase autonomously beyond
   the verification smoke tests in step 5 — the user decides when/how much

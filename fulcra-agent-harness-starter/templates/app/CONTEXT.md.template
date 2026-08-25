@@ -31,7 +31,7 @@ chronological journal, just high-signal architectural notes.)
 
 - **(initial)** Scaffolded from the fulcra-agent-harness-starter kit.
   Architecture, Interview, and Plan artifacts from the
-  fulcra-rapid-prototype skill's Intake/Interview/Architecture/Plan phases
+  fulcra-prototype-grill-me skill's Intake/Interview/Architecture/Plan phases
   informed this file's initial content — see `intake/`, `interview/`,
   `architecture.md`, and `plan.md` at the repo root (outside `app/`, since
   they're prototyping-phase artifacts, not part of the running app) for

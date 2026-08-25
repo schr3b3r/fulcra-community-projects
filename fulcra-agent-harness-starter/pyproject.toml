@@ -1,7 +1,7 @@
 [project]
 name = "fulcra-agent-harness-starter"
 version = "1.0.0"
-description = "Scaffolds a hand-rolled agent harness for a new Fulcra-backed project, using fulcra-rapid-prototype's Intake/Interview/Architecture/Plan phases to gather requirements first."
+description = "Scaffolds a hand-rolled agent harness for a new Fulcra-backed project, using fulcra-prototype-grill-me's Intake/Interview/Architecture/Plan phases to gather requirements first."
 requires-python = ">=3.11"
 dependencies = []
 

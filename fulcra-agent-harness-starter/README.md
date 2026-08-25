@@ -3,7 +3,7 @@
 A starter kit that scaffolds a small, hand-rolled agent harness (control
 loop + sandboxed tools + model provider adapter) for a new project built
 on [Fulcra](https://docs.fulcradynamics.com/), using the
-`fulcra-rapid-prototype` skill's Intake/Interview/Architecture/Plan phases
+`fulcra-prototype-grill-me` skill's Intake/Interview/Architecture/Plan phases
 to gather requirements before generating anything.
 
 This is both a **usable tool** (run `scripts/scaffold.py` to get a working
@@ -22,7 +22,7 @@ this starter kit is proven, not speculative.
 ## Quick start
 
 ```bash
-# 1. Run fulcra-rapid-prototype's Intake -> Interview -> Architecture ->
+# 1. Run fulcra-prototype-grill-me's Intake -> Interview -> Architecture ->
 #    Plan phases with your project idea (see that skill's own docs).
 #    This produces intake/brief.md, architecture.md, plan.md somewhere.
 
@@ -40,7 +40,7 @@ python scripts/scaffold.py \
   --output-dir /path/to/new-project
 
 # 3. Set up and verify the new project. If you saw "Preserving
-#    fulcra-rapid-prototype git history" above, a repo with the real
+#    fulcra-prototype-grill-me git history" above, a repo with the real
 #    Intake/Interview/Architecture/Plan commits already exists --
 #    just commit the new files on top:
 cd /path/to/new-project
@@ -49,7 +49,11 @@ git add -A && git commit -m "Scaffold harness + app"
 # Otherwise (no source git repo was found), initialize fresh instead:
 #   git init && git add -A && git commit -m "Initial scaffold"
 python -m venv .venv && .venv/bin/pip install -e .
-cp .env.example .env   # fill in GEMINI_API_KEY
+# Ask the user for a Gemini API key at this point (this is the first
+# moment it's actually needed -- see SKILL.md's Prerequisites section
+# for why it's deliberately not asked for any earlier) and write it
+# into GEMINI_API_KEY yourself rather than leaving it to the user:
+cp .env.example .env
 .venv/bin/python -m harness.test_loop_smoke   # confirm it actually works
 
 # 4. Run the first real task:
@@ -58,7 +62,7 @@ cp .env.example .env   # fill in GEMINI_API_KEY
 
 See `SKILL.md` for the full, step-by-step orchestration this is meant to
 be run through (as a Hermes skill), including where the
-`fulcra-rapid-prototype` phases fit in and what to verify before handing
+`fulcra-prototype-grill-me` phases fit in and what to verify before handing
 a scaffolded project back to the user.
 
 ## Layout
@@ -125,7 +129,7 @@ versions are a real starting point, not a finished product.
 
 ## Git history preservation
 
-`fulcra-rapid-prototype` commits after every phase (Intake, Interview,
+`fulcra-prototype-grill-me` commits after every phase (Intake, Interview,
 Architecture, Plan) — it uses that git history plus a `git bundle`
 backup specifically so a project can be resumed cleanly across fresh
 agent sessions with no shared filesystem. Throwing that history away the
@@ -205,7 +209,7 @@ happen this time.
   `pyproject.toml`, `.gitignore`, and `.env.example` directly into the
   cloned repo, overwriting any same-named files that happen to already
   exist there without asking. Not an issue for a typical
-  fulcra-rapid-prototype repo (its own files never collide with these
+  fulcra-prototype-grill-me repo (its own files never collide with these
   names), but review `git status`/`git diff` before committing if your
   source repo had its own root-level files with these names.
 
@@ -223,5 +227,5 @@ a real Gemini API key, confirm all pass.
 Not yet done: no automated CI for this repo itself; the
 `--domain-library-guidance` CLI flag is a manual convenience, not derived
 automatically from `architecture.md` (parsing that reliably would need
-more structure in `fulcra-rapid-prototype`'s own artifact format than it
+more structure in `fulcra-prototype-grill-me`'s own artifact format than it
 currently guarantees).

@@ -32,7 +32,7 @@
   Deliberately kept separate from `harness/` so it's always clear which
   layer is "the agent" and which is "the thing the agent is working on."
 - `intake/`, `interview/`, `architecture.md`, `plan.md` — artifacts from
-  the `fulcra-rapid-prototype` skill's Intake/Interview/Architecture/Plan
+  the `fulcra-prototype-grill-me` skill's Intake/Interview/Architecture/Plan
   phases, which is how this project's requirements were originally
   gathered before the harness was scaffolded. Kept at the repo root
   (outside `app/`) since they document the *prototyping process*, not the

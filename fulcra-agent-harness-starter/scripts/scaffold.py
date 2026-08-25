@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-scaffold.py — turns fulcra-rapid-prototype artifacts into a real,
+scaffold.py — turns fulcra-prototype-grill-me artifacts into a real,
 ready-to-run agent harness + app skeleton for a new project.
 
 WHAT THIS SCRIPT ASSUMES ALREADY EXISTS (read these before running):
-    - intake/brief.md        (fulcra-rapid-prototype: Intake phase)
-    - architecture.md        (fulcra-rapid-prototype: Architecture phase,
+    - intake/brief.md        (fulcra-prototype-grill-me: Intake phase)
+    - architecture.md        (fulcra-prototype-grill-me: Architecture phase,
                                approved by the user — this is a gate in
                                that skill, don't skip it)
-    - plan.md                (fulcra-rapid-prototype: Plan phase)
+    - plan.md                (fulcra-prototype-grill-me: Plan phase)
 If any of these don't exist yet, STOP and run those phases of
-fulcra-rapid-prototype first — this script does not gather requirements,
+fulcra-prototype-grill-me first — this script does not gather requirements,
 it only turns already-gathered requirements into a running harness.
 
 WHAT THIS SCRIPT PRODUCES, inside --output-dir (a NEW directory, sibling
@@ -39,7 +39,7 @@ to this starter kit, not inside it):
     .gitignore                — copied verbatim from templates/.gitignore.template
     .env.example              — copied verbatim from templates/.env.example.template
 
-GIT HISTORY: fulcra-rapid-prototype tracks each phase (Intake, Interview,
+GIT HISTORY: fulcra-prototype-grill-me tracks each phase (Intake, Interview,
 Architecture, Plan) as a real commit in its own repo. By default
 (--history=auto) this script PRESERVES that history: if
 --rapid-prototype-dir is itself a git working tree, the new project is
@@ -47,7 +47,7 @@ created by cloning it (so every phase commit becomes real history in the
 new repo), then harness/ and app/ are added on top as one new commit.
 If --rapid-prototype-dir is NOT a git repo (e.g. plain files, or a
 not-yet-unpacked .bundle -- unpack it first with
-`git clone <bundle> <dir>`, per fulcra-rapid-prototype's own "Resuming a
+`git clone <bundle> <dir>`, per fulcra-prototype-grill-me's own "Resuming a
 Project" instructions), this script falls back to --history=copy: a
 fresh repo is initialized and the artifact files are copied in as plain
 content in a single "Initial scaffold" commit, with no phase-by-phase
@@ -59,7 +59,7 @@ CAVEAT when --history=preserve/auto-preserving: this script writes
 harness/, app/, README.md, pyproject.toml, .gitignore, and .env.example
 directly into the cloned repo, OVERWRITING any same-named files that
 happen to already exist there without asking. This is a non-issue for a
-typical fulcra-rapid-prototype repo (it produces intake/, interview/,
+typical fulcra-prototype-grill-me repo (it produces intake/, interview/,
 architecture.md, plan.md — none of which collide with what this script
 writes), but if your rapid-prototype repo happens to already have its own
 README.md, .gitignore, etc. at the root, review `git diff` after
@@ -109,12 +109,12 @@ def is_git_working_tree(path: Path) -> bool:
     (--history=preserve/auto) is possible.
 
     Deliberately does NOT understand raw .bundle files directly (per
-    fulcra-rapid-prototype's own "Resuming a Project" instructions, a
+    fulcra-prototype-grill-me's own "Resuming a Project" instructions, a
     downloaded bundle is meant to be unpacked with
     `git clone <bundle> <dir>` before being resumed from) — keeping this
     script's git handling to "clone a working tree" only, rather than
     also parsing bundle files itself, keeps this one script simple and
-    inspectable rather than duplicating fulcra-rapid-prototype's own
+    inspectable rather than duplicating fulcra-prototype-grill-me's own
     resume mechanism.
     """
     if not path.is_dir():
@@ -129,7 +129,7 @@ def is_git_working_tree(path: Path) -> bool:
 
 def clone_with_history(source: Path, dest: Path, dry_run: bool) -> None:
     """Clone `source`'s full git history into `dest`, so every
-    fulcra-rapid-prototype phase commit (Intake, Interview, Architecture,
+    fulcra-prototype-grill-me phase commit (Intake, Interview, Architecture,
     Plan) becomes real, inspectable git history in the new project —
     rather than flattening that work into a single "Initial scaffold"
     commit with the artifact files copied in as plain content (which is
@@ -169,7 +169,7 @@ def clone_with_history(source: Path, dest: Path, dry_run: bool) -> None:
 
 
 def read_required_artifact(path: Path, phase_name: str) -> str:
-    """Read a required fulcra-rapid-prototype artifact file, failing with
+    """Read a required fulcra-prototype-grill-me artifact file, failing with
     a clear, actionable error if it doesn't exist yet — rather than
     silently proceeding with empty/placeholder content, which would
     produce a harness that looks scaffolded but is missing the actual
@@ -177,7 +177,7 @@ def read_required_artifact(path: Path, phase_name: str) -> str:
     if not path.is_file():
         raise ScaffoldError(
             f"Missing required artifact: {path}\n"
-            f"This should have been produced by fulcra-rapid-prototype's "
+            f"This should have been produced by fulcra-prototype-grill-me's "
             f"{phase_name} phase. Run that phase (and get it approved, if "
             f"it has a user gate) before running this script."
         )
@@ -191,7 +191,7 @@ def extract_first_plan_milestone(plan_md: str) -> tuple[str, str]:
     """Pull the first actionable milestone out of plan.md for hydrating
     the first task prompt.
 
-    fulcra-rapid-prototype's plan.md format is prose/markdown, not a
+    fulcra-prototype-grill-me's plan.md format is prose/markdown, not a
     strict machine-readable schema, so this is intentionally a
     best-effort heuristic (first level-2 or level-3 heading, plus the
     paragraph(s) under it) rather than a strict parser. It is expected
@@ -238,7 +238,7 @@ def extract_brief_description(brief_md: str) -> str:
     """Derive a one-paragraph project description from intake/brief.md,
     for hydrating PROJECT_DESCRIPTION.
 
-    fulcra-rapid-prototype's Intake template typically starts brief.md
+    fulcra-prototype-grill-me's Intake template typically starts brief.md
     with a markdown heading (e.g. "# Intake Brief: <name>") before the
     actual summary prose. Naively taking "the first \\n\\n-delimited
     block" without skipping that heading previously produced a
@@ -392,7 +392,7 @@ def main() -> int:
         "--rapid-prototype-dir", required=True, type=Path,
         help=(
             "Directory containing intake/brief.md, architecture.md, and "
-            "plan.md (the fulcra-rapid-prototype artifacts for this "
+            "plan.md (the fulcra-prototype-grill-me artifacts for this "
             "project)."
         ),
     )
@@ -425,7 +425,7 @@ def main() -> int:
     parser.add_argument(
         "--history", choices=["auto", "preserve", "copy"], default="auto",
         help=(
-            "How to handle fulcra-rapid-prototype's git history. "
+            "How to handle fulcra-prototype-grill-me's git history. "
             "'auto' (default): preserve it if --rapid-prototype-dir is a "
             "git working tree, otherwise fall back to 'copy'. 'preserve': "
             "require history preservation, erroring out if "
@@ -552,7 +552,7 @@ def main() -> int:
     print(f"Scaffolding {project_name!r} into {args.output_dir}\n")
 
     if preserve_history:
-        print("Preserving fulcra-rapid-prototype git history...")
+        print("Preserving fulcra-prototype-grill-me git history...")
         try:
             clone_with_history(args.rapid_prototype_dir, args.output_dir, args.dry_run)
         except ScaffoldError as exc:
@@ -660,7 +660,7 @@ def main() -> int:
     # these files in (along with every phase's individual commit, which
     # plain copying can never reproduce).
     if not preserve_history:
-        print("\nCopying fulcra-rapid-prototype artifacts into the new repo...")
+        print("\nCopying fulcra-prototype-grill-me artifacts into the new repo...")
         for artifact_name in ("intake", "interview", "architecture.md", "plan.md"):
             src = args.rapid_prototype_dir / artifact_name
             if not src.exists():
@@ -685,7 +685,7 @@ def main() -> int:
         if preserve_history:
             print(
                 f"  {step}. git log --oneline  # confirm your "
-                f"fulcra-rapid-prototype phase history came through, then "
+                f"fulcra-prototype-grill-me phase history came through, then "
                 f"git add -A && git commit -m 'Scaffold harness + app'"
             )
         else:

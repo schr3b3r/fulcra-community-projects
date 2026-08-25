@@ -66,7 +66,7 @@ def _git(*args: str, cwd: Path) -> subprocess.CompletedProcess:
 @pytest.fixture()
 def fake_rapid_prototype_git_repo(tmp_path: Path) -> Path:
     """Like fake_rapid_prototype_dir, but a REAL git repo with one commit
-    per fulcra-rapid-prototype phase -- mirrors what that skill actually
+    per fulcra-prototype-grill-me phase -- mirrors what that skill actually
     produces, so history-preservation tests exercise real git history,
     not just files that happen to be JSON/text-identical to it."""
     rp_dir = tmp_path / "rapid_prototype_git"
@@ -156,7 +156,7 @@ def test_is_git_working_tree_false_for_nonexistent_path(tmp_path: Path):
 def test_extract_brief_description_skips_leading_heading():
     """Regression test for a real bug found using this script on a real
     project: a brief.md starting with '# Intake Brief: <name>' (the
-    literal fulcra-rapid-prototype convention) before any real prose
+    literal fulcra-prototype-grill-me convention) before any real prose
     previously produced a PROJECT_DESCRIPTION that was just the heading
     text itself, since the old logic took 'the first \\n\\n-delimited
     block' without skipping the heading line first."""
@@ -396,7 +396,7 @@ def test_history_auto_preserves_real_phase_commits(
         capture_output=True, text=True,
     )
     assert result.returncode == 0, result.stderr
-    assert "Preserving fulcra-rapid-prototype git history" in result.stdout
+    assert "Preserving fulcra-prototype-grill-me git history" in result.stdout
 
     log = _git("log", "--format=%s", cwd=output_dir).stdout
     assert "Intake: initial brief" in log
@@ -405,8 +405,8 @@ def test_history_auto_preserves_real_phase_commits(
 
     # The rapid-prototype artifacts should be present via the cloned
     # history, not re-copied as a separate step (no "Copying
-    # fulcra-rapid-prototype artifacts" message for this path).
-    assert "Copying fulcra-rapid-prototype artifacts" not in result.stdout
+    # fulcra-prototype-grill-me artifacts" message for this path).
+    assert "Copying fulcra-prototype-grill-me artifacts" not in result.stdout
     assert (output_dir / "architecture.md").is_file()
     assert (output_dir / "plan.md").is_file()
 
@@ -464,8 +464,8 @@ def test_history_copy_flattens_even_when_source_is_a_git_repo(
         capture_output=True, text=True,
     )
     assert result.returncode == 0, result.stderr
-    assert "Preserving fulcra-rapid-prototype git history" not in result.stdout
-    assert "Copying fulcra-rapid-prototype artifacts" in result.stdout
+    assert "Preserving fulcra-prototype-grill-me git history" not in result.stdout
+    assert "Copying fulcra-prototype-grill-me artifacts" in result.stdout
     # No git repo should have been created at all by this script -- git
     # init is a step the user runs themselves afterward (see the printed
     # "Next steps"), same as in the always-plain-directory case.
@@ -514,6 +514,6 @@ def test_history_auto_falls_back_to_copy_for_non_git_source(
         capture_output=True, text=True,
     )
     assert result.returncode == 0, result.stderr
-    assert "Preserving fulcra-rapid-prototype git history" not in result.stdout
-    assert "Copying fulcra-rapid-prototype artifacts" in result.stdout
+    assert "Preserving fulcra-prototype-grill-me git history" not in result.stdout
+    assert "Copying fulcra-prototype-grill-me artifacts" in result.stdout
     assert (output_dir / "architecture.md").is_file()
