@@ -65,18 +65,42 @@ usable ones already exist.
   more thoroughly proven implementation (handles slow_down/expiry/
   headless-keyring edge cases). If that skill isn't available in this
   session, run the device flow directly instead of falling back to a
-  manual PAT -- it's a small, self-contained flow:
+  manual PAT -- it's a small, self-contained flow. **Run it as TWO
+  SEPARATE tool calls, not one combined script**: Step A requests the
+  device code and explicitly prints the user code/URL so you have real,
+  captured output to relay to the user; Step B (only after the user
+  confirms they've completed the browser step) does the polling. Doing
+  this as a single combined command risks the code/URL never actually
+  being shown to the user before the polling loop starts blocking on an
+  authorization they haven't been told how to grant yet -- keeping the
+  steps separate, with an explicit `echo` of the code, removes that
+  risk regardless of the exact mechanism.
+
+  **Step A (its own tool call) -- request the code and print it:**
   ```bash
-  # 1. Request a device code (gh's public client_id; scope: repo + read:org)
   RESP=$(curl -s -X POST -H "Accept: application/json" \
     -d "client_id=178c6fc778ccc68e1d6a&scope=repo,read:org" \
     https://github.com/login/device/code)
   DEVICE_CODE=$(echo "$RESP" | sed 's/.*"device_code":"\([^"]*\)".*/\1/')
   USER_CODE=$(echo "$RESP" | sed 's/.*"user_code":"\([^"]*\)".*/\1/')
   INTERVAL=$(echo "$RESP" | sed 's/.*"interval":\([0-9]*\).*/\1/'); INTERVAL=${INTERVAL:-5}
-  # Tell the user: open https://github.com/login/device and enter $USER_CODE
+  echo "DEVICE_CODE=$DEVICE_CODE"
+  echo "USER_CODE=$USER_CODE"
+  echo "INTERVAL=$INTERVAL"
+  echo "Open https://github.com/login/device and enter code: $USER_CODE"
+  ```
+  This command returns immediately (no polling here). Take the
+  `USER_CODE` line from its actual output and present the URL + code to
+  the user in your own reply. Wait for the user to confirm they've
+  completed the browser step before moving to Step B -- do not run
+  Step B speculatively while still waiting on the user.
 
-  # 2. Poll for the token (respect interval; back off +5s on slow_down)
+  **Step B (a separate tool call, only after the user confirms) --
+  poll for the token using the `DEVICE_CODE`/`INTERVAL` values you got
+  back from Step A's output:**
+  ```bash
+  DEVICE_CODE="<value from Step A's output>"
+  INTERVAL=<value from Step A's output>
   while true; do
     sleep "$INTERVAL"
     POLL=$(curl -s -X POST -H "Accept: application/json" \
@@ -94,6 +118,12 @@ usable ones already exist.
   done
   # Never echo $TOKEN to the user; use it directly to resolve the username below.
   ```
+  If this step's tool call has a hard timeout shorter than a real
+  human is likely to take to complete the browser flow, that's fine --
+  a timed-out/killed command here is recoverable (just re-run Step B
+  with the same `DEVICE_CODE` after checking with the user), unlike
+  Step A and B combined, where a timeout leaves the user with no code
+  to even act on in the first place.
   Only fall back to asking for a manually-created PAT if the device flow
   genuinely can't run in this environment (no outbound network to
   github.com, etc.) -- don't offer it as an equal first option.

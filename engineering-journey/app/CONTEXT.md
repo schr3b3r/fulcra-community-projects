@@ -231,6 +231,35 @@ yet started. Consult both, but don't duplicate one into the other.
 (Newest at the top. One entry per meaningful decision — not a full
 chronological journal, just high-signal architectural notes.)
 
+- **(Hardening prompted by a fresh-VM test)** `SKILL.md`'s inlined
+  GitHub device-code auth flow (Step 1a, used whenever the bundled
+  `github-auth` skill isn't available in the invoking session) was
+  originally written as ONE combined bash block covering both
+  requesting the device code and polling for the token, with the
+  instruction to show the user code/URL written as a bash comment
+  (inert -- not an actual `echo`). During a real fresh-VM test, the
+  user reported the agent appearing to hang after confirming it should
+  start the device flow; the agent then separately produced the code/
+  URL, which is NOT fully consistent with a genuine single-combined-
+  call deadlock (that failure mode leaves no opportunity to interject
+  mid-poll) -- the exact root cause was not confirmed (no transcript
+  was available to inspect), so this is recorded as a plausible
+  contributing factor and a real, independently-worth-fixing risk in
+  the script's structure, not a confirmed root-cause diagnosis.
+  **Fix:** split the flow into two explicitly separate steps, each its
+  own tool call: Step A requests the device code and now actually
+  `echo`s the user code/URL, returning immediately (no polling). Step B
+  -- only run after the user confirms they've completed the browser
+  step -- does the polling, using the values carried over from Step A's
+  real output. This removes the possibility of the code/URL never
+  reaching the user before polling starts, regardless of whether that
+  was the actual cause of what was observed.
+  This file lives at the repo root (`SKILL.md`, not under `app/`), so
+  it's outside the harness's sandboxed `git_commit` tool's scope --
+  committed directly with a plain `git commit`, not through the test
+  gate (there's no code/test surface for a skill-definition markdown
+  file to break).
+
 - **(Milestone 15 complete)** Added real Fulcra tag usage and deeper
   source-chain lineage, fixing a gap flagged directly by a user
   reviewing this project's Fulcra usage: this project had NEVER used
