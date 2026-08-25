@@ -417,6 +417,7 @@ def process_with_checkpoint(
     use_cache: bool = True,
     timeout_seconds: float = 5.0,
     checkpoint_interval: int = 1,
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> Dict[str, Any]:
     """Process a list of work items with automatic checkpointing and resumption support.
 
@@ -432,6 +433,13 @@ def process_with_checkpoint(
         use_cache: Whether to use in-memory cache when reading checkpoints.
         timeout_seconds: Timeout for querying checkpoints from Fulcra.
         checkpoint_interval: Write checkpoint after processing every N items.
+        progress_callback: Optional callable invoked with a structured event dict
+            at meaningful points during processing (task start, resume, each
+            completed item, and task completion) -- see the emitted event
+            "kind" values ("task_started", "item_completed", "task_completed")
+            for the full event shape. Never raises out of this function: a
+            failing callback (e.g. a broken terminal renderer) is caught and
+            ignored so it can never break the actual backfill/rollup work.
 
     Returns:
         Summary dict containing status, processed_indices, and completed count.
@@ -439,6 +447,15 @@ def process_with_checkpoint(
     Raises:
         SimulatedInterruptError: If interrupt_at_index is reached.
     """
+
+    def _emit(event: Dict[str, Any]) -> None:
+        if progress_callback is None:
+            return
+        try:
+            progress_callback(event)
+        except Exception:
+            # Progress reporting must never be able to break real work.
+            pass
     if client is None:
         client = get_fulcra_client()
 
@@ -447,6 +464,14 @@ def process_with_checkpoint(
     )
 
     if existing and existing.status == "completed":
+        _emit(
+            {
+                "kind": "task_already_completed",
+                "task_id": task_id,
+                "stage": stage,
+                "total": len(items),
+            }
+        )
         return {
             "status": "completed",
             "completed_items_count": len(items),
@@ -468,6 +493,16 @@ def process_with_checkpoint(
     )
     progress.status = "in_progress"
     progress.total_items = len(items)
+
+    _emit(
+        {
+            "kind": "task_started",
+            "task_id": task_id,
+            "stage": stage,
+            "total": len(items),
+            "resumed_from_index": start_index if start_index > 0 else None,
+        }
+    )
 
     processed_indices: List[int] = []
 
@@ -495,8 +530,29 @@ def process_with_checkpoint(
         ):
             write_checkpoint(progress, client=client)
 
+        _emit(
+            {
+                "kind": "item_completed",
+                "task_id": task_id,
+                "stage": stage,
+                "index": idx + 1,  # 1-based, "item N of total"
+                "total": len(items),
+                "item": item,
+            }
+        )
+
     progress.status = "completed"
     write_checkpoint(progress, client=client)
+
+    _emit(
+        {
+            "kind": "task_completed",
+            "task_id": task_id,
+            "stage": stage,
+            "total": len(items),
+            "completed_items_count": progress.completed_items_count,
+        }
+    )
 
     return {
         "status": "completed",

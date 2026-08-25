@@ -41,6 +41,15 @@ All Milestones 1–11 are DONE:
 - Milestone 9: Migrated all record kinds to real, visible custom Fulcra data types (`fulcra_types.py`)
 - Milestone 10: Private repository discovery fix in `GitHubClient` (`github_client.py`)
 - Milestone 11: Delta-aware backfill fixing stale checkpoints masking improved discovery (`github_activity.py`)
+- Milestone 12: Live progress narration during `backfill`/`generate` (`checkpoint.py`,
+  `github_activity.py`, `rollup.py`, `notability.py`, `narrative.py`, `engineering_journey.py`)
+- Milestone 13: Skip repos with no author-scoped activity before per-chunk ingestion
+  (`github_client.py`'s `has_author_activity`, `github_activity.py`'s
+  `backfill_full_github_activity` pre-filtering)
+- Milestone 14: `recorded_at` reflects real historical event/period time,
+  never ingestion time, across all three record writers; deterministic
+  IDs for `GitHubActivityRaw` fix a previously-documented dedup gap
+  (`github_activity.py`, `rollup.py`, `notability.py`)
 
 The project is fully packaged, tested, and ready for execution by fresh agents or human users.
 
@@ -51,8 +60,24 @@ budget rediscovering them via trial and error (this has already happened
 twice on this project). Treat this as more authoritative than intuiting
 the "obvious" call signature from a method name.
 
+- **`recorded_at` convention (project-wide rule, binding for any future
+  writer):** `recorded_at` on any Fulcra record written by this project
+  MUST reflect the real historical event/period time that record
+  describes -- e.g. a GitHub commit's actual commit timestamp, or a
+  rollup's period `start_date` -- NEVER the moment the record happened
+  to be written/ingested. Ingestion/last-write time belongs in the
+  `updated_at` field inside the JSON `note` payload instead, kept
+  entirely separate. This matters because Fulcra's query surface
+  (`moment_annotations(start_time, end_time, ...)`, and the
+  platform-wide `get-records <TYPE> "<TIME_WINDOW>"` convention) is
+  fundamentally time-range-based -- a `recorded_at` that doesn't reflect
+  real event time makes genuinely time-scoped queries return nothing
+  even though the data exists, silently defeating the entire point of
+  storing it in Fulcra rather than an arbitrary blob store. See
+  Milestone 14's Decisions Log entry for the concrete bug this was
+  fixed from and how it was verified.
+
 - **Auth**: use `app/fulcra_client.py`'s `get_fulcra_client()` — do not
-  hand-roll `FulcraCredentials`/`FulcraAPI` construction. (In case that
   file is ever missing: the correct sequence is
   `FulcraCredentials.from_json(path.read_text())` then
   `FulcraAPI(credentials=creds)`, NOT `FulcraCredentials()` with no
@@ -188,6 +213,224 @@ yet started. Consult both, but don't duplicate one into the other.
 ## Decisions Log
 (Newest at the top. One entry per meaningful decision — not a full
 chronological journal, just high-signal architectural notes.)
+
+- **(Milestone 14 complete)** Fixed a real, foundational correctness bug
+  flagged directly by a user: every writer in this project set the
+  Fulcra `recorded_at` field to ingestion time (when the backfill script
+  happened to run), never the real historical event/period time the
+  record actually describes -- even though every dataclass already
+  carried the real timestamp (`GitHubActivityRaw.timestamp`,
+  `ActivityRollup`/`NotabilitySignal.start_date`) completely unused for
+  this purpose. Concretely: `GitHubActivityRaw.__post_init__` always
+  sets `updated_at` to "now" when not explicitly passed (which it never
+  was), so `to_fulcra_record()`'s `self.updated_at or self.timestamp`
+  fallback never actually reached the real-timestamp branch.
+  Why this matters (the user's own framing, preserved because it's the
+  right way to think about it): Fulcra's query surface is fundamentally
+  time-range-based (`moment_annotations(start_time, end_time, ...)`,
+  and the platform-wide `get-records <TYPE> "<TIME_WINDOW>"` pattern --
+  see the `fulcra-ingest` skill's CLI reference for the canonical
+  convention this project should have followed from the start:
+  https://raw.githubusercontent.com/fulcradynamics/agent-skills/main/skills/fulcra-ingest/references/fulcra-ingest-cli.md).
+  With `recorded_at` reflecting ingestion time, a ~3-year backfill's
+  thousands of records all cluster within the ~25-30 minutes the
+  backfill actually took -- querying "what happened in March 2024"
+  returns nothing, even though the record's own JSON `note` payload
+  contains real March 2024 data. This defeated the entire point of using
+  Fulcra as durable, genuinely time-queryable storage rather than a JSON
+  blob store that happens to live in Fulcra.
+  **Fix, scoped deliberately narrow (base types unchanged -- see below):**
+  - `GitHubActivityRaw.to_fulcra_record()`: `recorded_at` = the real
+    GitHub event timestamp (`self.timestamp`), formatted via a new
+    `_format_iso_timestamp()` helper (handles both plain
+    `"YYYY-MM-DD"` dates and full ISO timestamps, normalizing to UTC
+    `Z`-suffixed ISO 8601). `updated_at` (ingestion/last-write time)
+    stays inside the JSON `note` payload as before -- it's real
+    provenance, just not what `recorded_at` at the Fulcra-record level
+    should mean.
+  - `ActivityRollup`/`NotabilitySignal.to_fulcra_record()`: `recorded_at`
+    = the period's `start_date` (same `_format_iso_timestamp()` helper),
+    anchoring a period rollup/signal at when its period began, so it's
+    discoverable via a time-range query covering that period.
+  - Added `compute_deterministic_activity_id(activity_type, activity_id,
+    repo_name)` in `github_activity.py` (MD5 hash of the three fields
+    joined with `:`, converted to a UUID -- same technique as the
+    `fulcra-ingest` skill's `generate_deterministic_id.py`, implemented
+    natively here rather than taking a dependency on that skill/repo)
+    and wired it into `GitHubActivityRaw.to_fulcra_record()`'s `id`
+    field. This also fixes an already-documented, real gap: this
+    project's `write_raw_activities` had NO deduplication by
+    `activity_id` -- a pure append -- so re-running backfill over an
+    already-covered range would create real duplicate records; a
+    deterministic ID lets Fulcra's own dedup-by-id behavior (confirmed
+    via `fulcra-ingest`'s docs: "the Fulcra backend will safely ignore
+    duplicate IDs") do this for free.
+  - Deliberately did NOT reclassify `ActivityRollup`/`NotabilitySignal`
+    from `MomentAnnotation` to `DurationAnnotation`, even though a period
+    -spanning record is arguably a better semantic fit for a duration
+    type with `recorded_at = {start_time, end_time}` -- that's a larger,
+    separate structural migration (new custom type creation per base
+    type, every reader needs updating for duration-shaped `recorded_at`)
+    tracked as a deliberate future follow-up, not bundled in here so
+    this correctness fix could land cleanly and quickly on its own.
+  - Deliberately did NOT add deterministic IDs to
+    `ActivityRollup`/`NotabilitySignal` in this task -- their natural
+    composite key (`period_type` + `start_date` + `end_date` +
+    `username`) and existing regeneration patterns are a separate
+    concern from the one documented, real duplication risk this task
+    targeted (raw activity's pure-append writes).
+  - Did NOT attempt an automated bulk-migration of already-written
+    records with the old (wrong) `recorded_at` values -- that's a
+    separate, riskier operation deserving its own deliberate review, not
+    something to fold into a task whose job was fixing what NEW writes
+    produce.
+  **Verified:** added tests asserting `to_fulcra_record()`'s
+  `recorded_at` for all three record kinds matches real event/period
+  time (`test_github_activity_recorded_at_reflects_historical_timestamp`
+  and equivalents in `test_rollup.py`/`test_notability.py`), plus
+  determinism/distinctness tests for
+  `compute_deterministic_activity_id`. A real live test,
+  `test_historical_recorded_at_time_range_query_real`, proved a record
+  written with a historical `recorded_at` is genuinely discoverable via
+  a Fulcra time-range read scoped to that historical period (not just
+  present in an unbounded read) -- confirmed passing against this
+  environment's real Fulcra account. Full mocked suite (`pytest -k "not
+  real"`) reran clean after the harness run: 52 passed, 2 pre-existing
+  flaky failures in `test_fulcra_types.py`
+  (`test_checkpoint_custom_type_write_and_read`,
+  `test_rollup_custom_type_write_and_read`) confirmed to be the
+  already-documented eventual-consistency flake (both pass cleanly on
+  immediate isolated retry, unrelated to this change's actual diff),
+  not a real regression.
+  **Process note:** run through `harness.run_task`
+  (`task_014_milestone-14-recorded-at-real-event-time.md`), matching
+  this project's established process. The harness run hit the
+  30-iteration cap after writing real, passing code + tests but before
+  updating `features/INDEX.md`/this file -- the same overrun pattern
+  already documented for Milestones 8, 9, 11, and 13 above -- completed
+  by hand: this Decisions Log entry, the `features/INDEX.md` row, and
+  the commit through the harness's own `git_tool.git_commit` gate.
+
+- **(Milestone 13 complete)** Added a range-wide `has_author_activity`
+  pre-check in `GitHubClient` and wired it into
+  `backfill_full_github_activity` (both the normal and delta-backfill
+  paths) so repos with zero commits/issues/PRs authored by the user
+  across the ENTIRE requested date range are excluded from the
+  per-period-chunk work item list entirely -- never touched by
+  `_ingest_single_item_activity`. Motivation: `enumerate_repositories()`
+  discovers everything the account has *access* to that was pushed-to
+  in-window (including org repos the user never personally touched),
+  and before this fix every discovered repo paid 3 Search API calls
+  PER period chunk (commits/PRs/issues) regardless of whether it had
+  any of the user's own activity -- for a ~50-100 chunk 3-year backfill,
+  that's 150-300 wasted calls per genuinely-inactive-for-this-user org
+  repo. `has_author_activity` costs up to 2 calls total per repo (1 for
+  `search/commits`, 1 for `search/issues` covering both issues and PRs
+  via `type:issue,pr` in one query -- short-circuits to `True` without
+  the second call if the first already finds a commit), run once before
+  the chunk loop, not once per chunk.
+  Honest trade-off, not sold as free: repos that DO have activity now
+  pay those up to-2 extra calls up front before their real per-chunk
+  work begins -- a net win when activity is spread across many chunks,
+  roughly a wash for a repo with activity in exactly one chunk.
+  Also refactored `_paginate_search`'s rate-limit retry/backoff logic
+  into a shared `_execute_search_request` helper so `has_author_activity`
+  reuses it instead of duplicating it.
+  **Process note:** this task was run through `harness.run_task`
+  (matching this project's own established process, after an earlier
+  task in this same working session was mistakenly done by hand instead
+  -- flagged and corrected before this one). The harness run itself hit
+  the 30-iteration cap after real code + real passing tests were
+  written but before `features/INDEX.md` was updated and before
+  `git_commit` was called -- the same overrun pattern already documented
+  for Milestones 8, 9, and 11 above. Completed manually: added the
+  `features/INDEX.md` row (the feature file itself,
+  `features/12_skip_repos_no_activity.md`, was already written and
+  complete), added this Decisions Log entry (also not reached), then
+  committed through the harness's own `git_tool.git_commit` (not a bare
+  `git commit`) so the real pytest-gate still ran rather than being
+  bypassed.
+  **Verified:** full mocked suite (`pytest -k "not real"`) reran clean:
+  50/50 passed. Did not additionally verify the live-API test variant
+  of `has_author_activity` against a real account, since no
+  `GITHUB_TOKEN` is available in this environment -- the task prompt
+  required that test to skip gracefully rather than block on it for
+  exactly this reason, matching the existing pattern in
+  `test_github_client.py`.
+  Naming correction: the feature file/task prompt this was built from
+  labeled this "Milestone 12," not realizing that number was already
+  used by the (out-of-harness) progress-narration change earlier in
+  this session -- renumbered to Milestone 13 here and in "Current
+  State" above; the feature file's own filename
+  (`12_skip_repos_no_activity.md`) and its internal doc were left as
+  written rather than renamed, since `features/` numbering and
+  milestone numbering are two separate sequences in this project and
+  don't have to match 1:1.
+
+- **(Milestone 12 complete)** Fixed a real UX gap found via a live test:
+  a user running `backfill` (25-30 min for a typical ~3-year/~8-repo
+  account) saw only a start message and a final summary, with total
+  silence in between -- no matter which model was driving the agent
+  session that invoked the CLI. Root cause confirmed by reading the code,
+  not assumed: `checkpoint.process_with_checkpoint` (the shared engine
+  behind every phase -- raw ingestion, day/week/month/quarter/year
+  rollups, notability signals) had no way to report per-item progress at
+  all; whatever narration a user got before was coming from the driving
+  model's own conversational habits around the silent tool call, not from
+  the skill itself -- so switching models (e.g. to a terser one) made the
+  experience visibly worse, exposing that the skill never actually
+  guaranteed progress reporting on its own.
+  **Fix:** added an optional `progress_callback` parameter to
+  `process_with_checkpoint` that emits structured events (`task_started`
+  with resume info, `item_completed` per work item, `task_completed`,
+  `task_already_completed`) -- deliberately swallowing any exception from
+  the callback so a broken renderer can never break real backfill/rollup
+  work. Threaded this same parameter through every caller
+  (`backfill_full_github_activity`, `generate_day_week_rollups`,
+  `generate_month_rollups`, `generate_layer_rollups`,
+  `generate_notability_signals`) and added an equivalent hand-rolled
+  `_emit`/event set inside `narrative.generate_journey_narrative` (which
+  has no checkpoint loop of its own, but does iterate one real countable
+  unit -- backbone sections -- during LLM synthesis: `overview_started`,
+  `section_started`, `section_completed`, `narrative_completed`).
+  `engineering_journey.py` gained a `ProgressReporter` class -- one
+  central place that renders these events as live stdout lines with a
+  real `[i/total]` counter, a percentage, a human-legible per-item label
+  (repo + date range + granularity, or period type + date range), and a
+  rolling ETA computed from actual elapsed-time-per-item so far. It
+  throttles "still working" lines to at most once every 4 seconds by
+  default (avoids spamming for the ~100+ item runs a full 3-year backfill
+  produces) but always prints on real phase boundaries (task start/
+  resume/complete) regardless of throttling. `run_backfill` also now
+  prints an explicit `[Phase N/6]` banner before each of the six pipeline
+  stages, so the overall shape of the run is visible up front, not just
+  the within-phase item counter. Deliberately did NOT key progress
+  narration to "milestones" (the build-history unit, 1-11 above) --
+  milestones don't exist at runtime for a user watching a live run; the
+  real countable units already existed in the code (work items:
+  period-chunk x repo pairs for backfill/rollups, rollup x child pairs
+  for notability signals, backbone sections for narrative synthesis) and
+  needed surfacing, not inventing.
+  `progress_callback` defaults to a fresh `ProgressReporter()` in both
+  `run_backfill`/`run_generate` if the caller doesn't supply one, so the
+  documented `python app/engineering_journey.py backfill/generate`
+  invocations get this automatically with zero new flags; passing an
+  explicit no-op callable suppresses it if ever needed (e.g. piping
+  output elsewhere).
+  **Verified:** existing `tests/test_checkpoint.py` (5/5) and
+  `tests/test_engineering_journey.py` (5/5, updated to assert
+  `progress_callback=ANY` on the three orchestration calls whose exact
+  kwargs the tests pin) both pass clean. Manually exercised
+  `ProgressReporter` standalone against synthetic backfill-item and
+  narrative-section event sequences and confirmed the rendered output
+  matches the intended UX (live `[i/total]`, percentage, labeled item,
+  ETA, phase banners) -- see the two smoke-test invocations run during
+  this task for the exact rendered output. Did not re-run the full
+  live-API test suite (`test_github_activity.py`,
+  `test_narrative.py`, etc.) since those require real GitHub/Fulcra/
+  Gemini credentials not available in this environment; they exercise
+  business logic this change doesn't touch (`progress_callback` is
+  purely additive/optional everywhere it was threaded).
 
 - **(Milestone 11 complete)** Made `backfill_full_github_activity`
   delta-aware, fixing the gap below. It now stores the actual discovered

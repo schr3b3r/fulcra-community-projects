@@ -416,6 +416,7 @@ def generate_journey_narrative(
     client: Optional[FulcraAPI] = None,
     output_path: Optional[str] = None,
     llm_callable: Optional[Callable[..., Any]] = None,
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> str:
     """Generate a single, paced, engaging Markdown journey document from Fulcra rollups and signals.
 
@@ -426,10 +427,24 @@ def generate_journey_narrative(
         client: Optional authenticated FulcraAPI client.
         output_path: Optional file path to write markdown output.
         llm_callable: Optional custom LLM function.
+        progress_callback: Optional callable invoked with a structured event
+            dict as each backbone section's prose is synthesized (event
+            "kind" values: "overview_started", "section_started",
+            "section_completed", "narrative_completed"). Never raises out
+            of this function -- a failing callback is caught and ignored.
 
     Returns:
         Full generated Markdown text string.
     """
+
+    def _emit(event: Dict[str, Any]) -> None:
+        if progress_callback is None:
+            return
+        try:
+            progress_callback(event)
+        except Exception:
+            pass
+
     if client is None:
         client = get_fulcra_client()
 
@@ -443,6 +458,8 @@ def generate_journey_narrative(
         rollups=rollups,
         signals=signals,
     )
+
+    _emit({"kind": "overview_started", "total_sections": len(sections)})
 
     overview_text = _synthesize_overview(
         username=username,
@@ -463,7 +480,15 @@ def generate_journey_narrative(
     ]
 
     # Build chronological sections
-    for sec in sections:
+    for i, sec in enumerate(sections):
+        _emit(
+            {
+                "kind": "section_started",
+                "index": i + 1,
+                "total": len(sections),
+                "title": sec.title,
+            }
+        )
         doc_lines.append(f"## {sec.title}")
         sec_prose = _synthesize_section_narrative(
             username=username,
@@ -472,6 +497,14 @@ def generate_journey_narrative(
         )
         doc_lines.append(sec_prose)
         doc_lines.append("")
+        _emit(
+            {
+                "kind": "section_completed",
+                "index": i + 1,
+                "total": len(sections),
+                "title": sec.title,
+            }
+        )
 
     # Build Provenance Appendix
     doc_lines.append("## Appendix: Provenance & Data References")
@@ -523,6 +556,15 @@ def generate_journey_narrative(
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(markdown_content)
         logger.info("Saved journey narrative markdown to %s", output_path)
+
+    _emit(
+        {
+            "kind": "narrative_completed",
+            "total_sections": len(sections),
+            "output_path": output_path,
+            "character_count": len(markdown_content),
+        }
+    )
 
     return markdown_content
 

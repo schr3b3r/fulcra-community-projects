@@ -1,5 +1,6 @@
 """Tests for raw GitHub activity model, persistence, and checkpointed ingestion."""
 
+import json
 import os
 import subprocess
 import uuid
@@ -12,6 +13,7 @@ from github_activity import (
     backfill_full_github_activity,
     build_backfill_work_items,
     clear_raw_activities,
+    compute_deterministic_activity_id,
     generate_period_chunks,
     ingest_github_activity,
     read_raw_activities,
@@ -58,7 +60,109 @@ def test_github_activity_dataclass_serialization():
 
     fulcra_record = act.to_fulcra_record()
     assert "recorded_at" in fulcra_record
+    assert fulcra_record["recorded_at"] == "2026-06-15T12:00:00Z"
+    assert "id" in fulcra_record
+    assert fulcra_record["id"] == compute_deterministic_activity_id(
+        act.activity_type, act.activity_id, act.repo_name
+    )
     assert "note" in fulcra_record
+
+
+def test_github_activity_recorded_at_reflects_historical_timestamp():
+    """Verify recorded_at reflects real GitHub event timestamp, not ingestion updated_at time."""
+    historical_ts = "2024-03-15T10:20:30Z"
+    act = GitHubActivityRaw(
+        activity_type="commit",
+        activity_id="sha_hist_123",
+        repo_name="org/historical-repo",
+        username="histuser",
+        timestamp=historical_ts,
+        title_or_summary="feat: historical commit in 2024",
+    )
+
+    fulcra_rec = act.to_fulcra_record()
+    # recorded_at must be the historical event timestamp
+    assert fulcra_rec["recorded_at"] == historical_ts
+    assert fulcra_rec["recorded_at"] != act.updated_at
+
+    # updated_at must remain in the JSON note payload
+    note_payload = json.loads(fulcra_rec["note"])
+    assert note_payload["updated_at"] == act.updated_at
+    assert note_payload["timestamp"] == historical_ts
+
+    # id field must be deterministic activity ID
+    expected_id = compute_deterministic_activity_id(
+        "commit", "sha_hist_123", "org/historical-repo"
+    )
+    assert fulcra_rec["id"] == expected_id
+
+
+def test_deterministic_activity_id_helper():
+    """Verify compute_deterministic_activity_id produces deterministic, distinct UUIDs."""
+    id1 = compute_deterministic_activity_id("commit", "sha123", "owner/repo")
+    id2 = compute_deterministic_activity_id("commit", "sha123", "owner/repo")
+    assert id1 == id2
+    assert len(id1) == 36  # Standard UUID string length
+
+    id3 = compute_deterministic_activity_id("pull_request", "123", "owner/repo")
+    assert id1 != id3
+
+    id4 = compute_deterministic_activity_id("commit", "sha123", "owner/other-repo")
+    assert id1 != id4
+
+
+def test_historical_recorded_at_time_range_query_real():
+    """Real live API test: write a record with historical timestamp and prove it is discoverable
+    via a time-range query for that historical period, but excluded from non-overlapping periods."""
+    client = get_fulcra_client()
+    test_username = f"hist_test_{uuid.uuid4().hex[:6]}"
+    test_repo = f"hist_repo_{uuid.uuid4().hex[:6]}"
+    historical_ts = "2024-03-15T10:00:00Z"
+
+    act = GitHubActivityRaw(
+        activity_type="commit",
+        activity_id=f"sha_{uuid.uuid4().hex[:8]}",
+        repo_name=test_repo,
+        username=test_username,
+        timestamp=historical_ts,
+        title_or_summary="feat: historical work from March 2024",
+    )
+
+    try:
+        written = write_raw_activities([act], client=client)
+        assert len(written) == 1
+
+        # Query matching the historical March 2024 window
+        matching = read_raw_activities(
+            username=test_username,
+            repo_name=test_repo,
+            start_time="2024-03-01T00:00:00Z",
+            end_time="2024-03-31T23:59:59Z",
+            client=client,
+            expected_min_count=1,
+            timeout_seconds=20.0,
+        )
+        assert len(matching) == 1
+        assert matching[0].timestamp == historical_ts
+
+        # Query for non-overlapping window (2025)
+        non_matching = read_raw_activities(
+            username=test_username,
+            repo_name=test_repo,
+            start_time="2025-01-01T00:00:00Z",
+            end_time="2025-01-31T23:59:59Z",
+            client=client,
+        )
+        assert len(non_matching) == 0
+
+    finally:
+        clear_raw_activities(
+            username=test_username,
+            repo_name=test_repo,
+            start_time="2024-01-01T00:00:00Z",
+            end_time="2026-12-31T23:59:59Z",
+            client=client,
+        )
 
 
 def test_write_and_read_raw_activities():
@@ -90,12 +194,7 @@ def test_write_and_read_raw_activities():
         written = write_raw_activities([act1, act2], client=client)
         assert len(written) == 2
 
-        # Read back records. Fulcra writes are eventually consistent, so
-        # poll (with a generous timeout) until both just-written records
-        # actually show up, rather than treating a single immediate
-        # query as authoritative -- the same category of intermittent
-        # failure already hit and fixed for checkpoint.py's
-        # list_checkpoints (see app/CONTEXT.md's Decisions Log).
+        # Read back records with eventual consistency polling
         read_records = read_raw_activities(
             username=test_username,
             repo_name=test_repo,
@@ -185,10 +284,6 @@ def test_real_bounded_window_ingestion_end_to_end():
         assert summary["completed_items_count"] > 0
         assert "fulcradynamics/agent-skills" in summary["repos_processed"]
 
-        # Read back ingested records from Fulcra (poll briefly for the
-        # same eventual-consistency reason as the write/read test above,
-        # though real ingestion's own runtime usually makes this a
-        # non-issue in practice).
         records = read_raw_activities(
             username=username,
             repo_name="fulcradynamics/agent-skills",
@@ -199,11 +294,9 @@ def test_real_bounded_window_ingestion_end_to_end():
 
         assert len(records) > 0
 
-        # Verify real content
         activity_types = {r.activity_type for r in records}
         assert "commit" in activity_types or "pull_request" in activity_types
 
-        # Verify commit message or PR title is non-empty real text
         sample_record = records[0]
         assert len(sample_record.title_or_summary) > 0
         assert sample_record.username == username
@@ -224,15 +317,12 @@ def test_real_bounded_window_ingestion_end_to_end():
 
 
 def test_generate_period_chunks_decaying_granularity():
-    """Last 90 days -> weekly chunks; older -> monthly chunks (Interview
-    decision #1's decaying-granularity boundary)."""
     end = "2026-07-01"
-    start = "2023-07-02"  # ~3 years back
+    start = "2023-07-02"
 
     chunks = generate_period_chunks(start, end, recent_days=90)
 
     assert len(chunks) > 0
-    # Chronological order, no gaps, no overlaps
     for i in range(1, len(chunks)):
         prev_end = chunks[i - 1]["end_date"]
         curr_start = chunks[i]["start_date"]
@@ -243,17 +333,14 @@ def test_generate_period_chunks_decaying_granularity():
     assert len(monthly) > 0
     assert len(weekly) > 0
 
-    # All monthly chunks strictly precede all weekly chunks
     assert monthly[-1]["end_date"] < weekly[0]["start_date"]
 
-    # Boundary: weekly chunks should only cover the most recent ~90 days
     from datetime import datetime, timedelta, timezone
 
     end_dt = datetime(2026, 7, 1, tzinfo=timezone.utc)
     cutoff = (end_dt - timedelta(days=90)).strftime("%Y-%m-%d")
     assert weekly[0]["start_date"] >= cutoff
 
-    # Full window covered: first chunk starts at start_date, last ends at end_date
     assert chunks[0]["start_date"] == start
     assert chunks[-1]["end_date"] == end
 
@@ -273,14 +360,12 @@ def test_build_backfill_work_items_ordering():
     items = build_backfill_work_items(repos, chunks)
 
     assert len(items) == 4
-    # Chronological by period first
     assert [i["start_date"] for i in items] == [
         "2026-01-01",
         "2026-01-01",
         "2026-02-01",
         "2026-02-01",
     ]
-    # Repos alphabetically within each period
     assert items[0]["repo_name"] == "alpha/repo"
     assert items[1]["repo_name"] == "zeta/repo"
     assert items[0]["granularity"] == "monthly"
@@ -294,11 +379,6 @@ def test_build_backfill_work_items_empty_inputs():
 
 
 def test_full_backfill_multi_repo_multi_period_resumability_real(monkeypatch):
-    """Milestone 3's real, at-scale resumability demo: interrupt a real
-    backfill run partway through a work-item list that spans MULTIPLE repos
-    AND multiple period-chunk granularities (not just one repo/one window
-    like Milestones 1-2's tests), then confirm a fresh call resumes at the
-    correct index with zero duplicate or skipped work items."""
     token, username = get_test_credentials()
     if not token:
         pytest.skip("No GitHub token available for live API test.")
@@ -310,10 +390,6 @@ def test_full_backfill_multi_repo_multi_period_resumability_real(monkeypatch):
     test_task_id = f"test_full_backfill_{uuid.uuid4().hex[:8]}"
 
     try:
-        # Bound the window so the real work-item list spans both monthly
-        # and weekly granularity but stays small enough to run in a task
-        # (~5 months -> a handful of monthly chunks + ~13 weekly chunks,
-        # x2 repos = tens of items, not thousands).
         with pytest.raises(SimulatedInterruptError):
             backfill_full_github_activity(
                 gh_client=gh_client,
@@ -325,7 +401,6 @@ def test_full_backfill_multi_repo_multi_period_resumability_real(monkeypatch):
                 task_id=test_task_id,
             )
 
-        # Fresh call (simulating a fresh process): resume without interruption
         result = backfill_full_github_activity(
             gh_client=gh_client,
             start_date="2026-02-01",
@@ -339,11 +414,8 @@ def test_full_backfill_multi_repo_multi_period_resumability_real(monkeypatch):
         assert result["status"] == "completed"
         assert result["resumed_from_index"] == 5
         assert result["total_items"] > 5
-        # Multi-period-granularity: both monthly and weekly chunks present
         assert result["period_chunks_count"] > 1
         assert set(result["repo_names"]) == set(repos)
-        # Every index in the full item list was processed exactly once
-        # across both calls (first call: 0-4, second call: 5..end).
         assert result["completed_items_count"] == result["total_items"]
 
     finally:
@@ -353,12 +425,6 @@ def test_full_backfill_multi_repo_multi_period_resumability_real(monkeypatch):
 
 
 def test_backfill_delta_awareness_real():
-    """Milestone 11's live integration test:
-    1. Perform a narrow backfill for a single repo and complete it.
-    2. Perform a second backfill with an expanded repo set (including a new repo).
-    3. Assert the second call detects the new repo, runs a delta backfill,
-       ingests activity for the new repo, and does NOT duplicate activity
-       for the original repo."""
     token, username = get_test_credentials()
     if not token:
         pytest.skip("No GitHub token available for live API test.")
@@ -376,7 +442,6 @@ def test_backfill_delta_awareness_real():
 
     delta_task_id = None
     try:
-        # Pass 1: narrow backfill
         res1 = backfill_full_github_activity(
             gh_client=gh_client,
             start_date=start_date,
@@ -388,7 +453,6 @@ def test_backfill_delta_awareness_real():
         assert res1["status"] == "completed"
         assert res1["is_delta"] is False
 
-        # Query raw activities count for original repo after Pass 1
         records_before = read_raw_activities(
             username=username,
             repo_name="fulcradynamics/agent-skills",
@@ -398,7 +462,6 @@ def test_backfill_delta_awareness_real():
         )
         count_before = len(records_before)
 
-        # Pass 2: expanded backfill (adding new repo)
         res2 = backfill_full_github_activity(
             gh_client=gh_client,
             start_date=start_date,
@@ -412,7 +475,6 @@ def test_backfill_delta_awareness_real():
         assert res2["new_repos"] == ["schr3b3r/shimmer"]
         delta_task_id = res2.get("delta_task_id")
 
-        # Query raw activities count for original repo after Pass 2
         records_after = read_raw_activities(
             username=username,
             repo_name="fulcradynamics/agent-skills",
@@ -422,7 +484,6 @@ def test_backfill_delta_awareness_real():
         )
         count_after = len(records_after)
 
-        # Confirm count for original repo has NOT duplicated
         assert count_after == count_before
 
     finally:
@@ -434,5 +495,81 @@ def test_backfill_delta_awareness_real():
             repo_name="schr3b3r/shimmer",
             start_time=query_start,
             end_time=query_end,
+            client=client,
+        )
+
+
+def test_backfill_full_github_activity_skips_zero_activity_repos(monkeypatch):
+    client = get_fulcra_client()
+    gh_client = GitHubClient(token="dummy_token", username="dummy_user")
+
+    monkeypatch.setattr(
+        gh_client,
+        "enumerate_repositories",
+        lambda start, end: ["dummy/active1", "dummy/inactive", "dummy/active2"],
+    )
+
+    def mock_has_author_activity(repo, start, end):
+        return repo != "dummy/inactive"
+
+    monkeypatch.setattr(gh_client, "has_author_activity", mock_has_author_activity)
+    monkeypatch.setattr(gh_client, "fetch_commits", lambda repo, start, end: [])
+    monkeypatch.setattr(gh_client, "fetch_pull_requests", lambda repo, start, end: [])
+    monkeypatch.setattr(gh_client, "fetch_issues", lambda repo, start, end: [])
+
+    test_task_id = f"test_skip_inactive_{uuid.uuid4().hex[:8]}"
+
+    try:
+        summary = backfill_full_github_activity(
+            gh_client=gh_client,
+            start_date="2026-06-01",
+            end_date="2026-07-01",
+            client=client,
+            task_id=test_task_id,
+        )
+
+        assert summary["status"] == "completed"
+        assert summary["repos_skipped_no_activity"] == ["dummy/inactive"]
+        assert summary["active_repo_names"] == ["dummy/active1", "dummy/active2"]
+        assert summary["total_items"] == 2 * summary["period_chunks_count"]
+
+    finally:
+        clear_checkpoint(test_task_id, client=client)
+
+
+def test_backfill_full_github_activity_skips_no_activity_repo_real():
+    token, username = get_test_credentials()
+    if not token:
+        pytest.skip("No GitHub token available for live API test.")
+
+    client = get_fulcra_client()
+    gh_client = GitHubClient(token=token, username=username)
+
+    test_task_id = f"test_skip_real_{uuid.uuid4().hex[:8]}"
+
+    repos = ["fulcradynamics/agent-skills", "octocat/Hello-World"]
+    start_date = "2026-06-01"
+    end_date = "2026-07-01"
+
+    try:
+        summary = backfill_full_github_activity(
+            gh_client=gh_client,
+            start_date=start_date,
+            end_date=end_date,
+            repo_names=repos,
+            client=client,
+            task_id=test_task_id,
+        )
+
+        assert summary["status"] == "completed"
+        assert "octocat/Hello-World" in summary["repos_skipped_no_activity"]
+        assert "fulcradynamics/agent-skills" in summary["active_repo_names"]
+        assert "octocat/Hello-World" not in summary["active_repo_names"]
+
+    finally:
+        clear_checkpoint(test_task_id, client=client)
+        clear_raw_activities(
+            username=username,
+            repo_name="fulcradynamics/agent-skills",
             client=client,
         )
