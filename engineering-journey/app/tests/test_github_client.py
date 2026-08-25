@@ -80,6 +80,85 @@ def test_list_accessible_repositories_mock_pagination_and_filter(monkeypatch):
     assert "dummy_user/repo2" not in repos
 
 
+def test_has_author_activity_mock_short_circuits_on_commits(monkeypatch):
+    """Test that has_author_activity returns True on commit match and short-circuits the issues search."""
+    client = GitHubClient(token="dummy_token", username="dummy_user")
+    requests_made = []
+
+    def mock_get(url, params=None, timeout=None):
+        requests_made.append(url)
+
+        class MockResponse:
+            status_code = 200
+
+            def json(self):
+                if "search/commits" in url:
+                    return {"total_count": 1, "items": [{"sha": "12345"}]}
+                return {"total_count": 0, "items": []}
+
+        return MockResponse()
+
+    monkeypatch.setattr(client.session, "get", mock_get)
+
+    result = client.has_author_activity("dummy_user/repo1", "2026-01-01", "2026-06-01")
+    assert result is True
+    # Only 1 call made (search/commits) because commits > 0 short-circuits issues search
+    assert len(requests_made) == 1
+    assert "search/commits" in requests_made[0]
+
+
+def test_has_author_activity_mock_checks_issues_when_no_commits(monkeypatch):
+    """Test that has_author_activity checks issues search when commits search returns 0."""
+    client = GitHubClient(token="dummy_token", username="dummy_user")
+    requests_made = []
+
+    def mock_get(url, params=None, timeout=None):
+        requests_made.append(url)
+
+        class MockResponse:
+            status_code = 200
+
+            def json(self):
+                if "search/commits" in url:
+                    return {"total_count": 0, "items": []}
+                if "search/issues" in url:
+                    return {"total_count": 2, "items": [{"id": 1}]}
+                return {"total_count": 0, "items": []}
+
+        return MockResponse()
+
+    monkeypatch.setattr(client.session, "get", mock_get)
+
+    result = client.has_author_activity("dummy_user/repo1", "2026-01-01", "2026-06-01")
+    assert result is True
+    assert len(requests_made) == 2
+    assert "search/commits" in requests_made[0]
+    assert "search/issues" in requests_made[1]
+
+
+def test_has_author_activity_mock_returns_false_when_no_activity(monkeypatch):
+    """Test that has_author_activity returns False when both commits and issues searches return 0."""
+    client = GitHubClient(token="dummy_token", username="dummy_user")
+    requests_made = []
+
+    def mock_get(url, params=None, timeout=None):
+        requests_made.append(url)
+
+        class MockResponse:
+            status_code = 200
+
+            def json(self):
+                return {"total_count": 0, "items": []}
+
+        return MockResponse()
+
+    monkeypatch.setattr(client.session, "get", mock_get)
+
+    result = client.has_author_activity("dummy_user/repo1", "2026-01-01", "2026-06-01")
+    assert result is False
+    assert len(requests_made) == 2
+
+
 def test_real_github_client_contributions_and_search():
     token, username = get_test_credentials()
     if not token:
@@ -114,6 +193,27 @@ def test_real_github_client_contributions_and_search():
     )
     assert len(issues) > 0
     assert "title" in issues[0]
+
+
+def test_has_author_activity_real():
+    """Real live API test for has_author_activity."""
+    token, username = get_test_credentials()
+    if not token:
+        pytest.skip("No GitHub token available for live API test.")
+
+    client = GitHubClient(token=token, username=username)
+
+    # Repo with activity in June 2026
+    has_act = client.has_author_activity(
+        "fulcradynamics/agent-skills", "2026-06-01", "2026-07-01"
+    )
+    assert has_act is True
+
+    # Check a repo/range with no activity
+    no_act = client.has_author_activity(
+        "octocat/Hello-World", "2026-06-01", "2026-07-01"
+    )
+    assert no_act is False
 
 
 def test_list_accessible_repositories_real():

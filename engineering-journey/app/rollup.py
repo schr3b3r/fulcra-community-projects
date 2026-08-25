@@ -28,6 +28,18 @@ class RollupStoreError(Exception):
     """Exception raised for errors in ActivityRollup persistence or generation."""
 
 
+def _format_iso_timestamp(timestamp_str: str) -> str:
+    """Ensure a date or ISO timestamp string is formatted as ISO 8601 UTC timestamp."""
+    if len(timestamp_str) == 10 and timestamp_str[4] == "-" and timestamp_str[7] == "-":
+        return f"{timestamp_str}T00:00:00Z"
+    dt = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return dt.isoformat().replace("+00:00", "Z")
+
+
 @dataclass
 class ActivityRollup:
     """Represents a period rollup (day, week, month, quarter, year) summarizing GitHub activity."""
@@ -80,7 +92,7 @@ class ActivityRollup:
     def to_fulcra_record(self, source_tag: Optional[str] = None) -> Dict[str, Any]:
         """Format into a Fulcra MomentAnnotation record dict."""
         rec = {
-            "recorded_at": self.updated_at or datetime.now(timezone.utc).isoformat(),
+            "recorded_at": _format_iso_timestamp(self.start_date),
             "note": json.dumps(self.to_dict()),
         }
         if source_tag:
@@ -160,7 +172,7 @@ def read_rollups(
         period_type: Optional period type filter ("day", "week", "month", "quarter", "year").
         start_date: Optional start date string filter ("YYYY-MM-DD").
         end_date: Optional end date string filter ("YYYY-MM-DD").
-        start_time: Start of Fulcra query window (defaults to 3 years ago).
+        start_time: Start of Fulcra query window (defaults to 5 years ago).
         end_time: End of Fulcra query window (defaults to current time + 5 mins).
         client: Optional authenticated FulcraAPI client.
         expected_min_count: If > 0, poll until at least this many records exist.
@@ -175,7 +187,7 @@ def read_rollups(
 
     now = datetime.now(timezone.utc)
     if start_time is None:
-        start_time = now - timedelta(days=365 * 3)
+        start_time = now - timedelta(days=365 * 5)
     if end_time is None:
         end_time = now + timedelta(minutes=5)
 
@@ -255,7 +267,7 @@ def clear_rollups(
 
     now = datetime.now(timezone.utc)
     if start_time is None:
-        start_time = now - timedelta(days=365 * 3)
+        start_time = now - timedelta(days=365 * 5)
     if end_time is None:
         end_time = now + timedelta(minutes=5)
 
@@ -883,6 +895,7 @@ def generate_day_week_rollups(
     llm_callable: Optional[Callable[..., Any]] = None,
     use_cache: bool = True,
     raw_records: Optional[List[GitHubActivityRaw]] = None,
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> Dict[str, Any]:
     """Execute resumable day and week rollup generation for recent 90 days.
 
@@ -898,6 +911,9 @@ def generate_day_week_rollups(
         llm_callable: Optional custom LLM function.
         use_cache: Whether to use local memory cache for checkpoints.
         raw_records: Optional pre-fetched raw activity records.
+        progress_callback: Optional callable forwarded to
+            `checkpoint.process_with_checkpoint` -- see its docstring for
+            the emitted event shape.
 
     Returns:
         Summary dict of execution.
@@ -941,6 +957,7 @@ def generate_day_week_rollups(
         interrupt_at_index=interrupt_at_index,
         stage=stage,
         use_cache=use_cache,
+        progress_callback=progress_callback,
         metadata={
             "username": username,
             "start_date": start_str,
@@ -969,6 +986,7 @@ def generate_month_rollups(
     llm_callable: Optional[Callable[..., Any]] = None,
     use_cache: bool = True,
     raw_records: Optional[List[GitHubActivityRaw]] = None,
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> Dict[str, Any]:
     """Execute resumable month rollup generation for history older than 90 days.
 
@@ -983,6 +1001,9 @@ def generate_month_rollups(
         llm_callable: Optional custom LLM function.
         use_cache: Whether to use local memory cache for checkpoints.
         raw_records: Optional pre-fetched raw activity records.
+        progress_callback: Optional callable forwarded to
+            `checkpoint.process_with_checkpoint` -- see its docstring for
+            the emitted event shape.
 
     Returns:
         Summary dict of execution.
@@ -1026,6 +1047,7 @@ def generate_month_rollups(
         interrupt_at_index=interrupt_at_index,
         stage=stage,
         use_cache=use_cache,
+        progress_callback=progress_callback,
         metadata={
             "username": username,
             "start_date": start_str,
@@ -1056,6 +1078,7 @@ def generate_layer_rollups(
     use_cache: bool = True,
     child_rollups: Optional[List[ActivityRollup]] = None,
     child_period_types: Optional[List[str]] = None,
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> Dict[str, Any]:
     """Execute resumable higher-layer (quarter, year) rollup generation from child rollups.
 
@@ -1076,6 +1099,9 @@ def generate_layer_rollups(
             Defaults to ["week", "month"] (excludes "day" to avoid
             double-counting against week rollups covering the same
             dates).
+        progress_callback: Optional callable forwarded to
+            `checkpoint.process_with_checkpoint` -- see its docstring for
+            the emitted event shape.
 
     Returns:
         Summary dict of execution.
@@ -1128,6 +1154,7 @@ def generate_layer_rollups(
         interrupt_at_index=interrupt_at_index,
         stage=stage,
         use_cache=use_cache,
+        progress_callback=progress_callback,
         metadata={
             "username": username,
             "period_type": period_type,

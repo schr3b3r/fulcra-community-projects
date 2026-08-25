@@ -6,7 +6,8 @@ import hashlib
 import json
 import logging
 import time
-from typing import Any, Dict, List, Optional, Union
+import uuid
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from fulcra_api.core import FulcraAPI
 from fulcra_client import get_fulcra_client
@@ -25,6 +26,26 @@ logger = logging.getLogger("github_activity")
 
 class ActivityStoreError(Exception):
     """Exception raised for errors in raw activity persistence."""
+
+
+def compute_deterministic_activity_id(
+    activity_type: str, activity_id: str, repo_name: str
+) -> str:
+    """Compute a deterministic UUID string for a GitHub activity item."""
+    key = f"{activity_type}:{activity_id}:{repo_name}"
+    return str(uuid.UUID(bytes=hashlib.md5(key.encode("utf-8")).digest()))
+
+
+def _format_iso_timestamp(timestamp_str: str) -> str:
+    """Ensure a date or ISO timestamp string is formatted as ISO 8601 UTC timestamp."""
+    if len(timestamp_str) == 10 and timestamp_str[4] == "-" and timestamp_str[7] == "-":
+        return f"{timestamp_str}T00:00:00Z"
+    dt = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return dt.isoformat().replace("+00:00", "Z")
 
 
 @dataclass
@@ -84,8 +105,12 @@ class GitHubActivityRaw:
 
     def to_fulcra_record(self, source_tag: Optional[str] = None) -> Dict[str, Any]:
         """Format into a Fulcra MomentAnnotation record dict."""
+        record_id = self.id or compute_deterministic_activity_id(
+            self.activity_type, self.activity_id, self.repo_name
+        )
         rec = {
-            "recorded_at": self.updated_at or self.timestamp,
+            "id": record_id,
+            "recorded_at": _format_iso_timestamp(self.timestamp),
             "note": json.dumps(self.to_dict()),
         }
         if source_tag:
@@ -153,7 +178,7 @@ def read_raw_activities(
     Args:
         username: Optional username filter.
         repo_name: Optional repository name filter.
-        start_time: Start of query window (defaults to 3 years ago).
+        start_time: Start of query window (defaults to 5 years ago).
         end_time: End of query window (defaults to current time + 5 mins).
         client: Optional authenticated FulcraAPI client.
         expected_min_count: If > 0, poll (up to timeout_seconds) until at
@@ -169,7 +194,7 @@ def read_raw_activities(
 
     now = datetime.now(timezone.utc)
     if start_time is None:
-        start_time = now - timedelta(days=365 * 3)
+        start_time = now - timedelta(days=365 * 5)
     if end_time is None:
         end_time = now + timedelta(minutes=5)
 
@@ -242,7 +267,7 @@ def clear_raw_activities(
 
     now = datetime.now(timezone.utc)
     if start_time is None:
-        start_time = now - timedelta(days=365 * 3)
+        start_time = now - timedelta(days=365 * 5)
     if end_time is None:
         end_time = now + timedelta(minutes=5)
 
@@ -548,8 +573,13 @@ def backfill_full_github_activity(
     interrupt_at_index: Optional[int] = None,
     task_id: Optional[str] = None,
     use_cache: bool = True,
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> Dict[str, Any]:
     """Execute a full ~3-year multi-repo, multi-period activity backfill with checkpointing.
+
+    Pre-checks all discovered repositories using `gh_client.has_author_activity` across the
+    full date range to filter out repositories with zero author activity prior to creating
+    per-period work items.
 
     Args:
         gh_client: Configured GitHubClient instance.
@@ -561,6 +591,9 @@ def backfill_full_github_activity(
         interrupt_at_index: Optional 0-based index at which to simulate process failure.
         task_id: Custom checkpoint task ID.
         use_cache: Whether to use process-local memory cache when reading checkpoints.
+        progress_callback: Optional callable forwarded straight through to
+            `checkpoint.process_with_checkpoint` -- see that function's
+            docstring for the event shape emitted per work item.
 
     Returns:
         Summary dict of backfill execution.
@@ -615,35 +648,81 @@ def backfill_full_github_activity(
         new_repos = [r for r in sorted_discovered if r not in stored_set]
 
         if not new_repos:
-            items = build_backfill_work_items(repo_names, period_chunks)
             return {
                 "status": "completed",
                 "task_id": task_id,
                 "is_delta": False,
-                "completed_items_count": len(items),
-                "total_items": len(items),
-                "repo_names": repo_names,
+                "completed_items_count": len(sorted_discovered),
+                "total_items": len(sorted_discovered),
+                "repo_names": sorted_discovered,
+                "active_repo_names": sorted(
+                    existing.metadata.get("active_repo_names", sorted_discovered)
+                    if existing.metadata
+                    else sorted_discovered
+                ),
+                "repos_skipped_no_activity": existing.metadata.get(
+                    "repos_skipped_no_activity", []
+                )
+                if existing.metadata
+                else [],
                 "period_chunks_count": len(period_chunks),
                 "processed_indices": [],
                 "resumed_from_index": None,
                 "activities_count": 0,
             }
 
-        # New repos discovered that were not covered by the prior completed checkpoint
+        # New repos discovered that were not covered by prior completed checkpoint.
+        # Run author activity pre-check across full range on new_repos.
+        active_new_repos = [
+            r for r in new_repos if gh_client.has_author_activity(r, start_dt, end_dt)
+        ]
+        skipped_new_repos = [r for r in new_repos if r not in active_new_repos]
+
+        if skipped_new_repos:
+            logger.info(
+                "Delta backfill skipped %d new repos with no author activity in range: %s",
+                len(skipped_new_repos),
+                skipped_new_repos,
+            )
+
+        if not active_new_repos:
+            # All newly discovered repos had 0 author activity. Update parent metadata so they are marked evaluated.
+            all_repos = sorted(list(stored_set | set(new_repos)))
+            existing.metadata["repo_names"] = all_repos
+            existing.metadata["total_repos"] = len(all_repos)
+            existing.updated_at = datetime.now(timezone.utc).isoformat()
+            write_checkpoint(existing, client=client)
+
+            return {
+                "status": "completed",
+                "task_id": task_id,
+                "is_delta": True,
+                "new_repos": new_repos,
+                "active_new_repos": [],
+                "repos_skipped_no_activity": skipped_new_repos,
+                "completed_items_count": 0,
+                "total_items": 0,
+                "repo_names": sorted_discovered,
+                "period_chunks_count": len(period_chunks),
+                "processed_indices": [],
+                "resumed_from_index": None,
+                "activities_count": 0,
+            }
+
         delta_hash = hashlib.sha256(
-            ",".join(sorted(new_repos)).encode("utf-8")
+            ",".join(sorted(active_new_repos)).encode("utf-8")
         ).hexdigest()[:8]
         delta_task_id = f"{task_id}:delta:{delta_hash}"
-        delta_items = build_backfill_work_items(new_repos, period_chunks)
+        delta_items = build_backfill_work_items(active_new_repos, period_chunks)
 
         logger.info(
-            "Found %d new repos not covered by prior backfill task %s: %s; ingesting delta now.",
-            len(new_repos),
+            "Found %d new repos with author activity not covered by prior backfill task %s: %s; ingesting delta now.",
+            len(active_new_repos),
             task_id,
-            new_repos,
+            active_new_repos,
         )
         print(
-            f"Found {len(new_repos)} new repos not covered by prior backfill: {new_repos}. Ingesting delta now..."
+            f"Found {len(active_new_repos)} new repos with author activity not covered by prior backfill: {active_new_repos}. Ingesting delta now..."
         )
 
         ingested_count = 0
@@ -667,9 +746,12 @@ def backfill_full_github_activity(
             interrupt_at_index=interrupt_at_index,
             stage=f"{stage}_delta",
             use_cache=use_cache,
+            progress_callback=progress_callback,
             metadata={
                 "parent_task_id": task_id,
                 "repo_names": sorted(new_repos),
+                "active_repo_names": sorted(active_new_repos),
+                "repos_skipped_no_activity": sorted(skipped_new_repos),
                 "total_repos": len(new_repos),
                 "total_periods": len(period_chunks),
                 "username": gh_client.username,
@@ -690,9 +772,11 @@ def backfill_full_github_activity(
             "is_delta": True,
             "delta_task_id": delta_task_id,
             "new_repos": new_repos,
+            "active_new_repos": active_new_repos,
+            "repos_skipped_no_activity": skipped_new_repos,
             "completed_items_count": delta_checkpoint_result["completed_items_count"],
             "total_items": len(delta_items),
-            "repo_names": repo_names,
+            "repo_names": sorted_discovered,
             "period_chunks_count": len(period_chunks),
             "processed_indices": delta_checkpoint_result["processed_indices"],
             "resumed_from_index": delta_checkpoint_result.get("resumed_from_index"),
@@ -700,7 +784,24 @@ def backfill_full_github_activity(
         }
 
     # Normal backfill (first run or resuming an in-progress parent task)
-    items = build_backfill_work_items(repo_names, period_chunks)
+    active_repo_names = [
+        r for r in sorted_discovered if gh_client.has_author_activity(r, start_dt, end_dt)
+    ]
+    skipped_repo_names = [r for r in sorted_discovered if r not in active_repo_names]
+
+    if skipped_repo_names:
+        logger.info(
+            "Skipped %d repos with no author activity in range %s to %s: %s",
+            len(skipped_repo_names),
+            start_str,
+            end_str,
+            skipped_repo_names,
+        )
+        print(
+            f"Skipped {len(skipped_repo_names)} repos with no author activity in range: {skipped_repo_names}"
+        )
+
+    items = build_backfill_work_items(active_repo_names, period_chunks)
     ingested_count = 0
 
     def process_fn(item: Dict[str, Any], idx: int) -> None:
@@ -722,9 +823,12 @@ def backfill_full_github_activity(
         interrupt_at_index=interrupt_at_index,
         stage=stage,
         use_cache=use_cache,
+        progress_callback=progress_callback,
         metadata={
-            "repo_names": sorted(repo_names),
-            "total_repos": len(repo_names),
+            "repo_names": sorted_discovered,
+            "active_repo_names": sorted(active_repo_names),
+            "repos_skipped_no_activity": sorted(skipped_repo_names),
+            "total_repos": len(sorted_discovered),
             "total_periods": len(period_chunks),
             "username": gh_client.username,
         },
@@ -736,7 +840,9 @@ def backfill_full_github_activity(
         "is_delta": False,
         "completed_items_count": checkpoint_result["completed_items_count"],
         "total_items": len(items),
-        "repo_names": repo_names,
+        "repo_names": sorted_discovered,
+        "active_repo_names": active_repo_names,
+        "repos_skipped_no_activity": skipped_repo_names,
         "period_chunks_count": len(period_chunks),
         "processed_indices": checkpoint_result["processed_indices"],
         "resumed_from_index": checkpoint_result.get("resumed_from_index"),

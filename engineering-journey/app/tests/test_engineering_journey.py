@@ -1,6 +1,6 @@
 """Tests for the unified CLI entrypoint engineering_journey.py."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 import pytest
 
 from engineering_journey import (
@@ -77,6 +77,7 @@ def test_run_backfill_orchestration_flow(
         end_date="2026-06-01",
         repo_names=["owner/repo1"],
         client=mock_client,
+        progress_callback=ANY,
     )
 
     # 3. Verify day/week rollups called ONLY for the recent 90-day window
@@ -89,6 +90,7 @@ def test_run_backfill_orchestration_flow(
         start_date="2026-03-03",
         end_date="2026-06-01",
         client=mock_client,
+        progress_callback=ANY,
     )
     # 4. Verify month rollups called ONLY for the older window (up to the
     # day before the recent window starts).
@@ -97,6 +99,7 @@ def test_run_backfill_orchestration_flow(
         start_date="2026-01-01",
         end_date="2026-03-02",
         client=mock_client,
+        progress_callback=ANY,
     )
 
     # 5. Verify layer rollups called for quarter and year, across the FULL range
@@ -177,6 +180,7 @@ def test_run_generate_orchestration_flow(
         end_date="2026-06-01",
         client=mock_client,
         output_path="test_journey.md",
+        progress_callback=ANY,
     )
 
     assert content == "# Engineering Journey\nGenerated Content"

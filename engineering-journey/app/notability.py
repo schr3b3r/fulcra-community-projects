@@ -28,6 +28,18 @@ class NotabilityStoreError(Exception):
     """Exception raised for errors in NotabilitySignal persistence or computation."""
 
 
+def _format_iso_timestamp(timestamp_str: str) -> str:
+    """Ensure a date or ISO timestamp string is formatted as ISO 8601 UTC timestamp."""
+    if len(timestamp_str) == 10 and timestamp_str[4] == "-" and timestamp_str[7] == "-":
+        return f"{timestamp_str}T00:00:00Z"
+    dt = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return dt.isoformat().replace("+00:00", "Z")
+
+
 @dataclass
 class NotabilitySignal:
     """Represents a computed notability signal for a period rollup."""
@@ -86,7 +98,7 @@ class NotabilitySignal:
     def to_fulcra_record(self, source_tag: Optional[str] = None) -> Dict[str, Any]:
         """Format into a Fulcra MomentAnnotation record dict."""
         rec = {
-            "recorded_at": self.updated_at or datetime.now(timezone.utc).isoformat(),
+            "recorded_at": _format_iso_timestamp(self.start_date),
             "note": json.dumps(self.to_dict()),
         }
         if source_tag:
@@ -166,7 +178,7 @@ def read_notability_signals(
         period_type: Optional period type filter.
         start_date: Optional start date string filter.
         end_date: Optional end date string filter.
-        start_time: Start of Fulcra query window (defaults to 3 years ago).
+        start_time: Start of Fulcra query window (defaults to 5 years ago).
         end_time: End of Fulcra query window (defaults to current time + 5 mins).
         client: Optional authenticated FulcraAPI client.
         expected_min_count: If > 0, poll until at least this many records exist.
@@ -181,7 +193,7 @@ def read_notability_signals(
 
     now = datetime.now(timezone.utc)
     if start_time is None:
-        start_time = now - timedelta(days=365 * 3)
+        start_time = now - timedelta(days=365 * 5)
     if end_time is None:
         end_time = now + timedelta(minutes=5)
 
@@ -250,7 +262,7 @@ def clear_notability_signals(
 
     now = datetime.now(timezone.utc)
     if start_time is None:
-        start_time = now - timedelta(days=365 * 3)
+        start_time = now - timedelta(days=365 * 5)
     if end_time is None:
         end_time = now + timedelta(minutes=5)
 
@@ -527,6 +539,7 @@ def generate_notability_signals(
     stage: str = "notability_signals",
     use_cache: bool = True,
     rollups: Optional[List[ActivityRollup]] = None,
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> Dict[str, Any]:
     """Execute resumable NotabilitySignal generation across rollups for a user and period_type.
 
@@ -541,6 +554,9 @@ def generate_notability_signals(
         stage: Stage identifier for progress tracking.
         use_cache: Whether to use local memory cache for checkpoints.
         rollups: Optional pre-fetched list of ActivityRollup records.
+        progress_callback: Optional callable forwarded to
+            `checkpoint.process_with_checkpoint` -- see its docstring for
+            the emitted event shape.
 
     Returns:
         Summary dict of execution.
@@ -600,6 +616,7 @@ def generate_notability_signals(
         interrupt_at_index=interrupt_at_index,
         stage=stage,
         use_cache=use_cache,
+        progress_callback=progress_callback,
         metadata={
             "username": username,
             "period_type": period_type,

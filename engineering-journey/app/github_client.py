@@ -368,24 +368,67 @@ class GitHubClient:
         url = f"{self.base_url}/search/issues"
         return self._paginate_search(url, query)
 
-    def _paginate_search(
-        self, url: str, query: str, max_rate_limit_retries: int = 5
-    ) -> List[Dict[str, Any]]:
-        """Helper to handle paginated REST Search API requests.
+    def has_author_activity(
+        self,
+        repo_name: str,
+        start_date: Union[datetime, str],
+        end_date: Union[datetime, str],
+    ) -> bool:
+        """Check if any commits, PRs, or issues were authored by username in a repo across date range.
 
-        GitHub's Search API has a stricter rate limit (30 req/min for
-        authenticated requests) than the core REST API -- empirically hit
-        during Milestone 3's real multi-repo/multi-period backfill (3
-        search calls per work item, tens of items in quick succession
-        exceeds this easily). On a 403 that looks like a rate-limit
-        response, sleep until the limit resets (per `Retry-After` or
-        `X-RateLimit-Reset`, whichever is present) and retry, up to
-        `max_rate_limit_retries` times, rather than failing the whole
-        backfill on a transient/expected condition.
+        Makes up to 2 REST Search API calls with per_page=1 (commits search, and combined
+        issues+PRs search) across the entire date window. Returns True immediately if any activity
+        is found (short-circuiting the second call).
+
+        Note on trade-off: Repos with author activity pay up to 2 extra Search API calls
+        upfront before per-chunk ingestion starts. For multi-chunk backfills this is a net win;
+        for single-chunk repos with activity it is a minor overhead.
         """
-        items: List[Dict[str, Any]] = []
-        page = 1
-        per_page = 100
+        start_day = (
+            start_date.strftime("%Y-%m-%d")
+            if isinstance(start_date, datetime)
+            else str(start_date)[:10]
+        )
+        end_day = (
+            end_date.strftime("%Y-%m-%d")
+            if isinstance(end_date, datetime)
+            else str(end_date)[:10]
+        )
+
+        # 1. Search commits
+        commit_query = (
+            f"author:{self.username} repo:{repo_name} committer-date:{start_day}..{end_day}"
+        )
+        commit_data = self._execute_search_request(
+            f"{self.base_url}/search/commits",
+            commit_query,
+            per_page=1,
+            page=1,
+        )
+        if commit_data.get("total_count", 0) > 0:
+            return True
+
+        # 2. Search issues and PRs (search/issues searches both when type:issue,pr or type is omitted)
+        issues_pr_query = (
+            f"author:{self.username} type:issue,pr repo:{repo_name} created:{start_day}..{end_day}"
+        )
+        issues_pr_data = self._execute_search_request(
+            f"{self.base_url}/search/issues",
+            issues_pr_query,
+            per_page=1,
+            page=1,
+        )
+        return issues_pr_data.get("total_count", 0) > 0
+
+    def _execute_search_request(
+        self,
+        url: str,
+        query: str,
+        per_page: int = 100,
+        page: int = 1,
+        max_rate_limit_retries: int = 5,
+    ) -> Dict[str, Any]:
+        """Execute a single Search API GET request with rate limit handling."""
         rate_limit_retries = 0
 
         while True:
@@ -415,6 +458,28 @@ class GitHubClient:
                 )
 
             data = response.json()
+            if not isinstance(data, dict):
+                raise GitHubAPIError(
+                    f"Search API expected dict response, got {type(data).__name__}"
+                )
+            return data
+
+    def _paginate_search(
+        self, url: str, query: str, max_rate_limit_retries: int = 5
+    ) -> List[Dict[str, Any]]:
+        """Helper to handle paginated REST Search API requests."""
+        items: List[Dict[str, Any]] = []
+        page = 1
+        per_page = 100
+
+        while True:
+            data = self._execute_search_request(
+                url,
+                query,
+                per_page=per_page,
+                page=page,
+                max_rate_limit_retries=max_rate_limit_retries,
+            )
             page_items = data.get("items", [])
             items.extend(page_items)
 

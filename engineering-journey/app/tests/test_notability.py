@@ -1,5 +1,6 @@
 """Tests for NotabilitySignal model, calculation logic, persistence, and resumability."""
 
+import json
 import uuid
 import pytest
 
@@ -58,7 +59,29 @@ def test_notability_signal_dataclass_serialization():
 
     fulcra_record = signal.to_fulcra_record()
     assert "recorded_at" in fulcra_record
+    assert fulcra_record["recorded_at"] == "2026-06-01T00:00:00Z"
     assert "note" in fulcra_record
+
+
+def test_notability_signal_recorded_at_reflects_historical_start_date():
+    """Verify NotabilitySignal recorded_at reflects start_date formatted as ISO UTC timestamp."""
+    signal = NotabilitySignal(
+        period_type="month",
+        start_date="2024-03-01",
+        end_date="2024-03-31",
+        username="histuser",
+        notability_score=0.9,
+        flags=["high_volume"],
+        explanation="March 2024 high volume.",
+    )
+
+    rec = signal.to_fulcra_record()
+    assert rec["recorded_at"] == "2024-03-01T00:00:00Z"
+    assert rec["recorded_at"] != signal.updated_at
+
+    note = json.loads(rec["note"])
+    assert note["updated_at"] == signal.updated_at
+    assert note["start_date"] == "2024-03-01"
 
 
 def test_write_and_read_notability_signals():
@@ -457,16 +480,8 @@ def test_real_account_notability_signal_uses_real_rollups():
         )
         assert len(signals) == len(existing_week_rollups)
 
-        # At least one signal must reference a real baseline computed from
-        # more than zero prior periods (not every week is necessarily the
-        # very first, so this should be true for most real accounts with
-        # a handful of real weeks).
         assert any(s.baseline_stats.get("mean_total_activities", 0) > 0 for s in signals)
 
-        # The single highest-total-activity real week should end up with
-        # the highest (or tied-highest) notability score among these
-        # signals -- a real, checkable claim about the scoring, not just
-        # "some score exists".
         rollup_by_period = {
             (r.start_date, r.end_date): r for r in existing_week_rollups
         }

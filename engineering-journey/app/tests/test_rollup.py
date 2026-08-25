@@ -1,5 +1,6 @@
 """Tests for ActivityRollup model, persistence, generation, and resumability (day, week, month, quarter, year)."""
 
+import json
 import uuid
 import pytest
 
@@ -63,7 +64,27 @@ def test_activity_rollup_dataclass_serialization():
 
     fulcra_record = rollup.to_fulcra_record()
     assert "recorded_at" in fulcra_record
+    assert fulcra_record["recorded_at"] == "2026-06-15T00:00:00Z"
     assert "note" in fulcra_record
+
+
+def test_activity_rollup_recorded_at_reflects_historical_start_date():
+    """Verify ActivityRollup recorded_at reflects period start_date formatted as ISO UTC timestamp."""
+    rollup = ActivityRollup(
+        period_type="month",
+        start_date="2024-03-01",
+        end_date="2024-03-31",
+        username="histuser",
+        summary="March 2024 summary.",
+    )
+
+    rec = rollup.to_fulcra_record()
+    assert rec["recorded_at"] == "2024-03-01T00:00:00Z"
+    assert rec["recorded_at"] != rollup.updated_at
+
+    note = json.loads(rec["note"])
+    assert note["updated_at"] == rollup.updated_at
+    assert note["start_date"] == "2024-03-01"
 
 
 def test_write_and_read_rollups():
