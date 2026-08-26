@@ -1,7 +1,7 @@
 """Fulcra-backed durable progress checkpointing for GitHub activity backfills.
 
 This module implements the `GitHubBackfillProgress` record type and functions
-to read/write backfill progress to Fulcra as `MomentAnnotation` records tagged with
+to read/write backfill progress to Fulcra as `DurationAnnotation` records tagged with
 custom Fulcra data type source IDs.
 This ensures resumability across process restarts or failures without
 re-processing previously completed work or skipping items.
@@ -18,6 +18,23 @@ from fulcra_client import get_fulcra_client
 from fulcra_types import get_custom_source_tag
 
 RECORD_TYPE = "GitHubBackfillProgress"
+# Real, permanent constraint discovered while migrating this type to
+# DurationAnnotation (Milestone 17): this project's real Fulcra account
+# already has a custom data type literally named "GitHubBackfillProgress"
+# created back in Milestone 9, permanently classified as a MomentAnnotation
+# -- Fulcra does not support changing a custom type's base annotation type
+# after creation. Reusing the same catalog name here would silently resolve
+# to that old MomentAnnotation-based UUID (get_or_create_custom_data_type
+# looks up by name first) regardless of the annotation_type this module
+# requests, causing DurationAnnotation-shaped writes/reads to silently fail
+# against a type whose real underlying schema is still MomentAnnotation.
+# A new catalog name is required for a genuinely new DurationAnnotation-
+# based type. Per this project's explicit design decision (see Milestone
+# 17's Decisions Log entry), old MomentAnnotation-shaped
+# "GitHubBackfillProgress" records under the old name are deliberately
+# abandoned, not migrated -- checkpoints are ephemeral process state, not
+# durable historical data worth preserving across this type change.
+CATALOG_TYPE_NAME = "GitHubBackfillProgressV2"
 
 # In-memory cache for fast same-process checkpoint lookups
 _IN_MEMORY_CHECKPOINTS: Dict[str, "GitHubBackfillProgress"] = {}
@@ -35,6 +52,35 @@ class CheckpointError(Exception):
 
 class SimulatedInterruptError(Exception):
     """Exception raised when a work loop is interrupted by simulated process termination."""
+
+
+def _format_iso_timestamp(timestamp_str: str, end_of_day: bool = False) -> str:
+    """Ensure a date or ISO timestamp string is formatted as ISO 8601 UTC timestamp.
+
+    Args:
+        timestamp_str: a plain "YYYY-MM-DD" date or a full ISO timestamp.
+        end_of_day: when `timestamp_str` is a plain date (no time
+            component), format it as 23:59:59 instead of 00:00:00. This
+            matters specifically for DurationAnnotation's `end_time`:
+            Fulcra's backend has been confirmed (empirically, not just in
+            theory) to silently drop a DurationAnnotation record whose
+            `start_time` and `end_time` are exactly equal (a genuine
+            zero-length duration) -- a write call reports success, but
+            the record is never returned by any later read, filtered or
+            not. Any single-day period whose start_date == end_date
+            would otherwise format both bounds to the same
+            "YYYY-MM-DDT00:00:00Z" instant and silently vanish; using
+            end-of-day for the end bound keeps the duration genuinely
+            positive.
+    """
+    if len(timestamp_str) == 10 and timestamp_str[4] == "-" and timestamp_str[7] == "-":
+        return f"{timestamp_str}T23:59:59Z" if end_of_day else f"{timestamp_str}T00:00:00Z"
+    dt = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return dt.isoformat().replace("+00:00", "Z")
 
 
 @dataclass
@@ -99,9 +145,36 @@ class GitHubBackfillProgress:
         )
 
     def to_fulcra_record(self, source_tag: Optional[str] = None) -> Dict[str, Any]:
-        """Format the progress data into a Fulcra MomentAnnotation record dict."""
-        rec = {
-            "recorded_at": self.updated_at,
+        """Format the progress data into a Fulcra DurationAnnotation record dict."""
+        if self.start_date and self.end_date:
+            recorded_at = {
+                "start_time": _format_iso_timestamp(self.start_date),
+                "end_time": _format_iso_timestamp(self.end_date, end_of_day=True),
+            }
+        else:
+            # No item-level date range available for this checkpoint (e.g.
+            # a top-level task marker rather than a per-item update) --
+            # fall back to updated_at, but with a real, non-zero
+            # end_time. A DurationAnnotation whose start_time == end_time
+            # exactly is silently dropped by Fulcra's backend (confirmed
+            # empirically: the write call reports success, but the record
+            # is never returned by any later read) -- one second is an
+            # arbitrary but real, always-positive offset, not a
+            # meaningful duration in its own right.
+            start_dt = (
+                datetime.fromisoformat(self.updated_at.replace("Z", "+00:00"))
+                if self.updated_at
+                else datetime.now(timezone.utc)
+            )
+            if start_dt.tzinfo is None:
+                start_dt = start_dt.replace(tzinfo=timezone.utc)
+            end_dt = start_dt + timedelta(seconds=1)
+            recorded_at = {
+                "start_time": start_dt.isoformat().replace("+00:00", "Z"),
+                "end_time": end_dt.isoformat().replace("+00:00", "Z"),
+            }
+        rec: Dict[str, Any] = {
+            "recorded_at": recorded_at,
             "note": json.dumps(self.to_dict()),
         }
         if source_tag:
@@ -124,13 +197,15 @@ def write_checkpoint(
     if client is None:
         client = get_fulcra_client()
 
-    source_tag = get_custom_source_tag(RECORD_TYPE, client=client)
+    source_tag = get_custom_source_tag(
+        CATALOG_TYPE_NAME, client=client, annotation_type="duration"
+    )
     progress.updated_at = datetime.now(timezone.utc).isoformat()
     record = progress.to_fulcra_record(source_tag=source_tag)
 
     try:
         client.record_data_type(
-            "MomentAnnotation",
+            "DurationAnnotation",
             [record],
             api_version="v1alpha1",
         )
@@ -148,30 +223,66 @@ def _fetch_annotations_merged(
     record_type_name: str,
     start_iso: str,
     end_iso: str,
+    base_type: str = "MomentAnnotation",
+    catalog_type_name: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Helper to query Fulcra using custom type source tag first, merging with untagged records for backward compatibility."""
-    source_tag = get_custom_source_tag(record_type_name, client=client)
-    try:
-        annotations_tagged = client.moment_annotations(
-            start_iso, end_iso, source=source_tag
-        )
-    except Exception:
-        annotations_tagged = []
+    """Helper to query Fulcra using custom type source tag first, with untagged fallback if tagged query fails.
+
+    Args:
+        record_type_name: the value of the JSON `note.record_type` field
+            written into each record -- used to filter the untagged
+            fallback query down to just this record kind.
+        catalog_type_name: the REAL custom data type's catalog name used
+            to resolve/create the type and its source tag. Defaults to
+            `record_type_name` when not given, which is correct for every
+            record kind except GitHubBackfillProgress (see
+            checkpoint.CATALOG_TYPE_NAME's own docstring/comment for why
+            that one specific type needs a different catalog name than
+            its content-level record_type tag).
+    """
+    if catalog_type_name is None:
+        catalog_type_name = record_type_name
+
+    annotation_type = "duration" if base_type == "DurationAnnotation" else "moment"
+    source_tag = get_custom_source_tag(
+        catalog_type_name, client=client, annotation_type=annotation_type
+    )
+
+    fetch_fn = (
+        client.duration_annotations
+        if base_type == "DurationAnnotation"
+        else client.moment_annotations
+    )
+
+    annotations: List[Dict[str, Any]] = []
+    tagged_failed = False
 
     try:
-        annotations_all = client.moment_annotations(start_iso, end_iso)
-    except Exception as exc:
-        if not annotations_tagged:
+        annotations = fetch_fn(start_iso, end_iso, source=source_tag)
+    except Exception:
+        tagged_failed = True
+
+    if tagged_failed:
+        try:
+            annotations_all = fetch_fn(start_iso, end_iso)
+            for ann in annotations_all:
+                if not isinstance(ann, dict):
+                    continue
+                note_str = ann.get("note")
+                if not note_str:
+                    continue
+                try:
+                    data = json.loads(note_str)
+                    if isinstance(data, dict) and data.get("record_type") == record_type_name:
+                        annotations.append(ann)
+                except Exception:
+                    continue
+        except Exception as exc:
             raise exc
-        annotations_all = []
 
     by_id: Dict[str, Dict[str, Any]] = {}
-    for ann in annotations_tagged:
+    for ann in annotations:
         if isinstance(ann, dict) and "id" in ann:
-            by_id[ann["id"]] = ann
-
-    for ann in annotations_all:
-        if isinstance(ann, dict) and "id" in ann and ann["id"] not in by_id:
             by_id[ann["id"]] = ann
 
     return list(by_id.values())
@@ -222,7 +333,12 @@ def read_checkpoint(
     while True:
         try:
             annotations = _fetch_annotations_merged(
-                client, RECORD_TYPE, start_iso, end_iso
+                client,
+                RECORD_TYPE,
+                start_iso,
+                end_iso,
+                base_type="DurationAnnotation",
+                catalog_type_name=CATALOG_TYPE_NAME,
             )
         except Exception as exc:
             raise CheckpointError(
@@ -315,7 +431,12 @@ def list_checkpoints(
             latest_by_task.update(_IN_MEMORY_CHECKPOINTS)
 
         annotations = _fetch_annotations_merged(
-            client, RECORD_TYPE, start_iso, end_iso
+            client,
+            RECORD_TYPE,
+            start_iso,
+            end_iso,
+            base_type="DurationAnnotation",
+            catalog_type_name=CATALOG_TYPE_NAME,
         )
 
         for ann in annotations:
@@ -377,7 +498,14 @@ def clear_checkpoint(
     )
     end_iso = end_time.isoformat() if isinstance(end_time, datetime) else end_time
 
-    annotations = _fetch_annotations_merged(client, RECORD_TYPE, start_iso, end_iso)
+    annotations = _fetch_annotations_merged(
+        client,
+        RECORD_TYPE,
+        start_iso,
+        end_iso,
+        base_type="DurationAnnotation",
+        catalog_type_name=CATALOG_TYPE_NAME,
+    )
     tombstones = []
 
     for ann in annotations:
@@ -394,7 +522,7 @@ def clear_checkpoint(
                 ann_id = ann.get("id")
                 if ann_id:
                     tombstones.append(
-                        {"record_id": ann_id, "data_type": "MomentAnnotation"}
+                        {"record_id": ann_id, "data_type": "DurationAnnotation"}
                     )
         except (json.JSONDecodeError, KeyError, TypeError):
             continue
@@ -456,6 +584,7 @@ def process_with_checkpoint(
         except Exception:
             # Progress reporting must never be able to break real work.
             pass
+
     if client is None:
         client = get_fulcra_client()
 
@@ -507,6 +636,14 @@ def process_with_checkpoint(
     processed_indices: List[int] = []
 
     for idx in range(start_index, len(items)):
+        item = items[idx]
+        if isinstance(item, dict):
+            progress.start_date = item.get("start_date")
+            progress.end_date = item.get("end_date")
+        else:
+            progress.start_date = None
+            progress.end_date = None
+
         if interrupt_at_index is not None and idx == interrupt_at_index:
             # Save checkpoint before raising interrupt
             if processed_indices:
@@ -515,7 +652,6 @@ def process_with_checkpoint(
                 f"Simulated process interruption at index {idx} (item: {items[idx]})"
             )
 
-        item = items[idx]
         process_fn(item, idx)
         processed_indices.append(idx)
 

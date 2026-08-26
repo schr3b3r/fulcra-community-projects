@@ -22,6 +22,7 @@ status changes.
 | [13_recorded_at_real_event_time.md](13_recorded_at_real_event_time.md) | done | `recorded_at` reflects real historical event/period time across all writers, not ingestion time; deterministic IDs fix a raw-activity dedup gap |
 | [14_tags_and_source_chains.md](14_tags_and_source_chains.md) | done | Real Fulcra tags for repo_name/activity_type/period_type/notability flags, and deeper source-chain lineage marking derived vs. raw data |
 | [15_date_range_filter_fix.md](15_date_range_filter_fix.md) | done | Fixed `read_rollups`/`read_notability_signals` treating start_date/end_date as exact-string matches instead of range filters, which silently produced zero NotabilitySignal records on a real full-scale 3-year backfill |
+| [16_checkpoint_duration_annotation_migration.md](16_checkpoint_duration_annotation_migration.md) | done | Migrated GitHubBackfillProgress checkpoints from MomentAnnotation to DurationAnnotation, using the platform's native start/end time instead of a single ingestion-time instant |
 
 ## Status values
 - `not_started` — described but no work done yet.

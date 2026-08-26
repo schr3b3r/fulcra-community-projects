@@ -1,6 +1,6 @@
 """Tests for custom Fulcra data types management and backward compatibility."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import time
 from unittest.mock import MagicMock
@@ -195,14 +195,26 @@ def test_rollup_custom_type_write_and_read():
         clear_rollups(username=username, client=client)
 
 
-def test_backward_compatibility_old_and_new_records():
-    """Verify read_checkpoint retrieves both legacy untagged records and new source-tagged records."""
+def test_old_format_checkpoints_are_not_read_after_duration_annotation_migration():
+    """Verify read_checkpoint does NOT merge in old-format (pre-Milestone-17)
+    MomentAnnotation-shaped GitHubBackfillProgress records anymore.
+
+    This is a deliberate, discussed design decision (see Milestone 17's
+    Decisions Log entry): checkpoints are ephemeral process state, not
+    durable historical data worth a dual-read/migration path across the
+    MomentAnnotation -> DurationAnnotation type change. An old-format
+    record for the same task_id must NOT be returned even if a real one
+    exists in the account -- read_checkpoint only reads DurationAnnotation
+    checkpoints now.
+    """
     client = get_fulcra_client()
     now_iso = datetime.now(timezone.utc).isoformat()
-    task_id = f"test_backward_compat_{int(time.time())}"
+    task_id = f"test_old_format_abandoned_{int(time.time())}"
 
     try:
-        # Write legacy untagged record (no sources field) directly
+        # Write an old-format (pre-migration) MomentAnnotation checkpoint
+        # directly -- this is exactly the shape every real
+        # GitHubBackfillProgress record had before Milestone 17.
         old_note = {
             "record_type": "GitHubBackfillProgress",
             "task_id": task_id,
@@ -219,26 +231,44 @@ def test_backward_compatibility_old_and_new_records():
             api_version="v1alpha1",
         )
 
-        # Write new source-tagged record
-        cp_new = GitHubBackfillProgress(
-            task_id=task_id,
-            stage="new_stage",
-            last_processed_index=2,
-            completed_items_count=3,
-            total_items=10,
-            status="in_progress",
-        )
-        write_checkpoint(cp_new, client=client)
-
-        time.sleep(2.0)
-
-        # Read back checkpoint - should select the latest checkpoint (index 2) without failing or orphaning
+        # No new-format (DurationAnnotation) checkpoint written for this
+        # task_id -- read_checkpoint must find nothing, NOT fall back to
+        # the old-format MomentAnnotation record above.
         read_cp = read_checkpoint(
-            task_id=task_id, client=client, use_cache=False, timeout_seconds=15.0
+            task_id=task_id, client=client, use_cache=False, timeout_seconds=5.0
         )
-        assert read_cp is not None
-        assert read_cp.last_processed_index == 2
-        assert read_cp.stage == "new_stage"
+        assert read_cp is None
 
     finally:
-        clear_checkpoint(task_id, client=client)
+        # The old-format record above was written directly as a plain
+        # MomentAnnotation, outside this project's own tombstone-by-
+        # record_type helpers (which now only look at DurationAnnotation)
+        # -- clean it up directly rather than leaving stray test data.
+        try:
+            from checkpoint import _fetch_annotations_merged
+
+            now = datetime.now(timezone.utc)
+            anns = client.moment_annotations(
+                (now - timedelta(days=1)).isoformat(), now.isoformat()
+            )
+            tombstones = []
+            for ann in anns:
+                note_str = ann.get("note")
+                if not note_str:
+                    continue
+                try:
+                    d = json.loads(note_str)
+                except Exception:
+                    continue
+                if d.get("task_id") == task_id:
+                    ann_id = ann.get("id")
+                    if ann_id:
+                        tombstones.append(
+                            {"record_id": ann_id, "data_type": "MomentAnnotation"}
+                        )
+            if tombstones:
+                client.record_data_type(
+                    "DeletedRecord", tombstones, api_version="v1alpha1"
+                )
+        except Exception:
+            pass

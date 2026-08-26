@@ -59,6 +59,12 @@ All Milestones 1–11 are DONE:
   filters -- found via a real fresh-account 3-year backfill that
   silently produced zero `NotabilitySignal` records despite 310 real
   `ActivityRollup` records existing (`rollup.py`, `notability.py`)
+- Milestone 17: migrated `GitHubBackfillProgress` checkpoints from
+  `MomentAnnotation` to `DurationAnnotation`, using the platform's
+  native `{start_time, end_time}` instead of a single ingestion-time
+  instant -- found via a real account showing 3,391 checkpoints all
+  clustered on 2-3 calendar days despite representing a multi-year
+  backfill (`checkpoint.py`, `fulcra_types.py`)
 
 The project is fully packaged, tested, and ready for execution by fresh agents or human users.
 
@@ -235,6 +241,118 @@ yet started. Consult both, but don't duplicate one into the other.
 ## Decisions Log
 (Newest at the top. One entry per meaningful decision — not a full
 chronological journal, just high-signal architectural notes.)
+
+- **(Milestone 17 complete)** Migrated `checkpoint.GitHubBackfillProgress`
+  from `MomentAnnotation` to `DurationAnnotation` -- a genuine base-type
+  correction, not just another `recorded_at` value fix like Milestones
+  14/15. This was raised directly by a user reviewing the real Fulcra
+  portal web app: real `GitHubBackfillProgress` checkpoints written
+  throughout `backfill` weren't showing up the way expected across a
+  wide date range. Investigated against the real account and confirmed:
+  3,391 real checkpoint records existed, but EVERY one had
+  `recorded_at` clustered on just 2-3 calendar days (whichever days
+  backfill/rollup/notability generation actually ran), despite
+  representing a multi-year backfill -- because `recorded_at` was
+  `self.updated_at` (ingestion time), and the dataclass's own
+  `start_date`/`end_date` fields (meant to describe which specific work
+  item a checkpoint covers) were never actually populated at the call
+  site (`process_with_checkpoint` never set them). The user correctly
+  pushed back on the first proposed fix (approximate a span using a
+  single `recorded_at = start_date`, the same technique Milestones
+  14/15 used) and pointed out `DurationAnnotation` is the platform's
+  real native primitive for a record that IS a span -- using
+  `MomentAnnotation` here was always a type mismatch, not a
+  wrong-value bug.
+  **Real platform constraints discovered while building this (both
+  confirmed empirically against the real account, not assumed):**
+  1. A custom Fulcra data type's base annotation type CANNOT be
+     changed after creation. This account's real catalog already had
+     `GitHubBackfillProgress` permanently registered as a
+     `MomentAnnotation` (from Milestone 9). Reusing that name with a
+     new `annotation_type="duration"` request silently resolved to the
+     OLD MomentAnnotation UUID anyway (`get_or_create_custom_data_type`
+     looks up by name first, regardless of requested type), causing
+     writes/reads to silently fail against a type whose real schema
+     was still MomentAnnotation. A genuinely new catalog name
+     (`GitHubBackfillProgressV2`, `checkpoint.CATALOG_TYPE_NAME`) was
+     required. The JSON note payload's own `record_type` field stays
+     `"GitHubBackfillProgress"` -- that's a separate, content-level
+     concept from the real catalog/base-type identity, and changing it
+     would have been unnecessary scope creep.
+  2. **A `DurationAnnotation` record whose `start_time` and `end_time`
+     are EXACTLY equal is silently dropped by Fulcra's backend** -- the
+     write call reports success (`{"upload_id": ...}`), but the record
+     is never returned by ANY later read, filtered or unfiltered, at
+     any point after. Confirmed directly: wrote a test record with
+     `start_time == end_time`, got a normal-looking success response,
+     then polled `duration_annotations()` (both through this project's
+     own wrapper AND by calling the raw SDK method directly) and got
+     zero results every time, indefinitely -- ruling out eventual
+     consistency. This would have silently broken two real cases: (a)
+     a checkpoint with no item-level date range (the original fallback
+     used `updated_at` for both bounds), and (b) any genuine single-day
+     period chunk (`start_date == end_date` -- formatting both through
+     the same "start of day" convention produces identical instants).
+     **Fix:** `_format_iso_timestamp` gained an `end_of_day` parameter
+     (`23:59:59Z` instead of `00:00:00Z` for the end bound of a plain
+     date), and the no-date fallback now adds a real 1-second offset
+     between `start_time`/`end_time` instead of repeating the exact
+     same instant for both. This is a real, generally-useful platform
+     behavior worth remembering for any future `DurationAnnotation`
+     -based record type in this or other projects, not just this one.
+  **Also fixed in the same pass:** `_fetch_annotations_merged`'s real
+  overmatching bug -- its backward-compatibility fallback previously
+  queried ALL untagged `MomentAnnotation` records account-wide with no
+  source filter at all whenever the tagged query failed, which had
+  been silently inflating a real 3,391-record checkpoint query into
+  31,588 apparent "matches" against unrelated raw-activity/rollup/
+  signal records that happened to also exist untagged in the same
+  account (discovered while diagnosing the original portal-visibility
+  question, before the DurationAnnotation root cause was identified).
+  **Explicit, discussed design decision:** old `MomentAnnotation`
+  -shaped checkpoints (the 3,391 real pre-migration records) are
+  deliberately abandoned, NOT migrated and NOT dual-read. Checkpoints
+  are ephemeral process state, not durable historical data worth
+  preserving across a base-type change -- this was confirmed with the
+  user directly before implementing, not assumed. A new regression
+  test (`test_old_format_checkpoints_are_not_read_after_duration_annotation_migration`)
+  locks this in: a real old-format record for a given task_id must NOT
+  be returned by `read_checkpoint` even though it genuinely exists in
+  the account.
+  **Verified for real, end-to-end:** wrote a checkpoint with a real
+  historical `start_date`/`end_date`, confirmed it's genuinely
+  discoverable via `client.duration_annotations()` scoped to that
+  exact historical window (not just an unbounded read); confirmed the
+  zero-length-duration bug's fix with a real single-day and a real
+  no-date checkpoint, both round-tripping correctly; confirmed the old
+  `MomentAnnotation`-based `GitHubBackfillProgress` catalog entry is
+  untouched and the new `GitHubBackfillProgressV2` entry is a genuine,
+  separate `DurationAnnotation`-based type. Full suite: 18/18 in
+  `test_checkpoint.py`/`test_fulcra_types.py` combined, full project
+  suite 83 passed / 3 skipped (real GitHub + real Fulcra credentials
+  both live).
+  **Process note:** run through `harness.run_task`
+  (`task_017_milestone-17-migrate-checkpoint-duration-annotation.md`).
+  The harness's own run correctly built the bulk of the migration
+  (dataclass shape, `process_with_checkpoint`'s per-item date
+  derivation, most of the read/write plumbing) but left the task
+  ending on 10 consecutive failed real read-back polls without
+  resolving why -- it had reused the SAME catalog name
+  (`RECORD_TYPE = "GitHubBackfillProgress"`) for both the JSON
+  `record_type` tag and the real catalog/source-tag lookup, colliding
+  with the pre-existing `MomentAnnotation`-based type from Milestone 9
+  (constraint #1 above). Completed by hand: introduced
+  `CATALOG_TYPE_NAME` as a distinct constant, fixed three call sites
+  in `read_checkpoint`/`list_checkpoints`/`clear_checkpoint` that were
+  still passing the old colliding name into `_fetch_annotations_merged`
+  after the initial fix, discovered and fixed the separate zero-length-
+  duration platform behavior (constraint #2, not something the harness
+  run had reached), rewrote the harness's own backward-compatibility
+  test to instead assert the explicit abandonment design decision, and
+  added a new regression test for the zero-length-duration fix. All
+  doc updates (this entry, `features/INDEX.md`,
+  `features/16_checkpoint_duration_annotation_migration.md`) also
+  completed by hand.
 
 - **(Milestone 16 complete)** Fixed a real, high-impact bug found via a
   genuine fresh-account full-scale 3-year backfill test (not synthetic
