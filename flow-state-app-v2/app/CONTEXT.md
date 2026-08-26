@@ -89,6 +89,16 @@ yet started. Consult both, but don't duplicate one into the other.
 (Newest at the top. One entry per meaningful decision — not a full
 chronological journal, just high-signal architectural notes.)
 
+- **(this entry)** Added an optional metadata-only provenance and consent
+  generator for the proposed Maha integration. It hashes the full session,
+  marker sample and selected idea clip locally after explicit opt-in, binds the
+  transformation metadata and resulting MusicalIdea reference, and can derive
+  a narrower audience-bound share record that omits session/marker digests.
+  Consent and audience references are retained only as hashes. It is deliberately
+  not wired into the automatic pipeline yet: a real session must not be read
+  for this additional purpose until the musician has chosen a sharing scope.
+  This layer does not change or attest Fulcra's existing storage/access policy,
+  and it does not claim creative ownership or DSP accuracy.
 - **(this entry)** Fixed a real marker-detection bug found via live user
   testing: playing the marker once produced 4 "detections" in the review
   feed (one with an invisible highlighted region on the full-session
