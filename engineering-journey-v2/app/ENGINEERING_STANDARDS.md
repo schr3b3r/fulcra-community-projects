@@ -1,0 +1,128 @@
+# Engineering Standards
+
+These are hard requirements for all code in this app, not suggestions.
+They exist to solve a specific, observed problem: an agent building
+software autonomously will, left unchecked, regress previously-working
+functionality while adding new features, with no reliable way to catch it,
+and will drift toward mock data and ad-hoc file-based state instead of
+using the durable, owner-controlled context Fulcra actually provides.
+These standards are the fix — they turn "please be careful" into "the
+process itself catches you if you're not."
+
+## Testing (the big one)
+- Every feature ships with automated tests (pytest) covering its
+  acceptance criteria — see each feature's file in `app/features/`.
+- **Before declaring any task complete, run the FULL test suite** (e.g.
+  `pytest` from the sandbox root), not just tests related to the current
+  change. A task that adds a new feature but breaks an old one is not
+  done — it's a regression, and the whole point of this standard is to
+  catch that automatically instead of hoping nobody notices.
+- Tests live under `app/tests/`, mirroring the structure of the code they
+  test.
+- Prefer real, runnable tests (actually import and exercise the code)
+  over tests that only check that a file exists or contains certain text.
+- Prefer testing against real Fulcra data over mocks where practical (see
+  "Prefer real Fulcra data in tests" below) — this project's harness has
+  real Fulcra credentials available specifically so this is possible.
+
+## Type hints
+Use type hints throughout — function signatures, return types, and
+non-trivial variables. This is not optional style preference; it makes
+mistakes easier to catch and keeps the codebase honest about what it
+expects.
+
+## Prefer established libraries over hand-rolled logic
+Don't reinvent things a well-established library already does well.
+- (TODO: fill this in by hand based on your actual project's domain -- e.g. for audio/DSP: `librosa`, `scipy`, `numpy`; for a web backend: pick one framework and don't introduce a competing one without a real reason.)
+- Fulcra integration: the `fulcra-api` Python SDK (`pip install
+  fulcra-api`) — NOT the `fulcra-api` CLI, and NOT raw subprocess/shell
+  calls to any Fulcra tooling. The SDK gives real Python objects, proper
+  exceptions, and testability that shelling out does not.
+
+## Fulcra-specific patterns
+These map directly onto the architectural patterns described in
+[fulcra-for-agents.md](https://github.com/kubla/fulcra-for-agents/blob/main/fulcra-for-agents.md) —
+read that document once, up front, if you haven't; it explains *why*
+these rules exist, not just what they are.
+
+- **Context–Compute Separation:** owner-scoped context that should outlive
+  this agent process, this conversation, or this application version
+  belongs in Fulcra — not in local files, not in this process's memory.
+  Local disk/in-memory state is a fast-path cache at best, never the
+  durable copy of anything that matters. When in doubt about whether
+  something should be written to Fulcra, prefer durability.
+- **Derived Context:** when this app computes a conclusion from raw data
+  (a summary, classification, extracted value, decision, etc.), record it
+  with its producer/provenance and a reference to the observations it was
+  derived from — not just the bare conclusion. A later agent or task
+  should be able to tell "this value was computed by X from Y," not just
+  see the value.
+- **Use annotation/event/metric data types** (`MomentAnnotation`,
+  `NumericAnnotation`, custom types via `create_annotation`/
+  `record_data_type`) to make application state queryable, rather than
+  relying on directory scanning or implicit file state to answer "what
+  has happened / what is the current state.
+- **`recorded_at` must reflect real event/period time, never ingestion
+  time.** Every record has a `recorded_at` field, and it is tempting to
+  default it to "now" (when the record happens to be written) since
+  that's often the only timestamp trivially at hand at the write call
+  site. Resist this default whenever the data being recorded describes
+  something that happened at a different, real historical
+  moment — a source event's own timestamp, a period's start date, a
+  measurement's actual time. Fulcra's query surface is fundamentally
+  time-range-based (`moment_annotations(start_time, end_time, ...)`,
+  and the CLI's `get-records <TYPE> "<TIME_WINDOW>"` convention); a
+  `recorded_at` that reflects ingestion time instead of real event time
+  makes genuinely time-scoped queries return nothing even though the
+  data exists, silently defeating the entire reason for using Fulcra's
+  durable, time-queryable storage rather than an arbitrary blob store.
+  If a batch of historical/backfilled data is being ingested, its
+  records' `recorded_at` values should be spread across the real
+  historical range they represent, not clustered at the moment the
+  ingestion script happened to run. Keep true ingestion/last-write time
+  in a separate field (e.g. inside a JSON `note` payload, or a distinct
+  `updated_at`-style field) if it's worth preserving — don't conflate
+  it with `recorded_at`.
+- **Prefer real Fulcra tags for cross-cutting, filterable dimensions
+  over embedding them only inside a JSON `note` payload.** If a record
+  has a field a consumer would plausibly want to filter or group by
+  (a category, a type, a status flag, an author, a project/repo name),
+  create/resolve it as a real Fulcra tag
+  (`client.create_tags(list[str])` — idempotent, safe to call
+  repeatedly) and attach the resolved tag UUID(s) to the record's
+  `tags` array, rather than leaving it only as a key inside the note
+  JSON blob. A field trapped in an opaque JSON string is invisible to
+  anyone using the Fulcra API directly (not through this specific
+  application) without first fetching every record and parsing it
+  themselves; a real tag is filterable by anyone, including the record
+  owner inspecting their own data through Context Web, the CLI, or a
+  different agent entirely. Resolve tag UUIDs ONCE per distinct value
+  per run (cache them — the same idempotent-lookup-then-cache pattern
+  already used for custom data type UUIDs), not once per record, since
+  tag creation/lookup is a real API call.
+- **Use the `sources` chain for real lineage, not just type identity.**
+  If a project is already attaching a single source tag purely to
+  distinguish one custom data type's records from another's, consider
+  whether the `sources` array should carry more of the record's real
+  provenance chain (origin system -> intermediate artifact/context ->
+  producing agent), ordered origin-to-destination, with the type-
+  identity tag as the final element. This makes a record's lineage
+  inspectable without parsing its note payload, and lets a later agent
+  distinguish raw/ingested data from derived/computed data (the
+  "Derived Context" pattern above) directly from `sources` rather than
+  needing app-specific knowledge of what the JSON note structure means.
+- **Resumable Discovery:** if this app has any kind of polling/background
+  loop that should pick up "what changed since last time," maintain an
+  explicit durable progress marker (in Fulcra, not a local file) rather
+  than re-scanning everything each run or losing track across restarts.
+- Validate records against their schema (`validate_records`) before
+  submitting them where practical, so malformed data is caught with a
+  clear error rather than an opaque API rejection.
+
+## Regression prevention (enforced, not just requested)
+The `git_commit` tool itself runs the test suite before allowing a commit
+to succeed, and refuses to commit if any test fails. This means the rule
+above ("run tests before declaring done") is not just an instruction the
+agent is expected to follow — it is structurally impossible to commit code
+that fails existing tests through that tool. See
+`harness/tools/git_tool.py` for the actual mechanism.
