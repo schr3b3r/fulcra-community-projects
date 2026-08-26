@@ -46,6 +46,7 @@ def get_or_create_custom_data_type(
     name: str,
     description: Optional[str] = None,
     client: Optional[FulcraAPI] = None,
+    annotation_type: str = "moment",
 ) -> str:
     """Ensure a custom Fulcra data type exists in the user's catalog and return its UUID.
 
@@ -53,6 +54,7 @@ def get_or_create_custom_data_type(
         name: The catalog name of the data type (e.g. 'GitHubBackfillProgress').
         description: Optional description if creating for the first time.
         client: Optional authenticated FulcraAPI client.
+        annotation_type: The base annotation type ('moment' or 'duration').
 
     Returns:
         The UUID string assigned by Fulcra to this custom data type.
@@ -71,11 +73,11 @@ def get_or_create_custom_data_type(
         user_id = client.get_fulcra_userid()
         catalog = client.v1_catalog(fulcra_userid=user_id)
         for item in catalog:
-            if item.get("name") == name and item.get("id", "").startswith(
-                "MomentAnnotation/"
-            ):
-                parts = item["id"].split("/", 1)
-                if len(parts) == 2:
+            item_name = item.get("name")
+            item_id = item.get("id", "")
+            if item_name == name and "/" in item_id:
+                parts = item_id.split("/", 1)
+                if len(parts) == 2 and parts[0] in ("MomentAnnotation", "DurationAnnotation"):
                     uuid_str = parts[1]
                     _TYPE_UUID_CACHE[name] = uuid_str
                     return uuid_str
@@ -84,7 +86,7 @@ def get_or_create_custom_data_type(
 
     # If not found in catalog, create it
     res = client.create_annotation(
-        annotation_type="moment",
+        annotation_type=annotation_type,
         name=name,
         description=description,
         tags=[],
@@ -97,17 +99,21 @@ def get_or_create_custom_data_type(
 def get_custom_source_tag(
     name: str,
     client: Optional[FulcraAPI] = None,
+    annotation_type: str = "moment",
 ) -> str:
     """Return the source tag for a custom data type (f'com.fulcradynamics.annotation.{uuid}').
 
     Args:
         name: The catalog name of the custom data type.
         client: Optional authenticated FulcraAPI client.
+        annotation_type: The base annotation type ('moment' or 'duration').
 
     Returns:
         The full source tag string, e.g. 'com.fulcradynamics.annotation.<uuid>'.
     """
-    uuid_str = get_or_create_custom_data_type(name, client=client)
+    uuid_str = get_or_create_custom_data_type(
+        name, client=client, annotation_type=annotation_type
+    )
     return f"com.fulcradynamics.annotation.{uuid_str}"
 
 
