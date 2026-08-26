@@ -179,6 +179,77 @@ def test_write_and_read_rollups():
         clear_rollups(username=test_user, client=client)
 
 
+def test_read_rollups_date_range_overlap_and_outer_bounds():
+    """Verify read_rollups performs genuine range-overlap filtering instead of exact string matching.
+
+    Tests that querying with outer bounds (start_date/end_date) returns all rollups whose
+    start_date/end_date ranges overlap or fall within those outer bounds.
+    """
+    client = get_fulcra_client()
+    test_user = f"rangeuser_{uuid.uuid4().hex[:6]}"
+
+    # Create 3 rollups spanning different date ranges within 2024-01-01 to 2024-03-31
+    r1 = ActivityRollup(
+        period_type="month",
+        start_date="2024-01-01",
+        end_date="2024-01-31",
+        username=test_user,
+        summary="Jan summary.",
+    )
+    r2 = ActivityRollup(
+        period_type="month",
+        start_date="2024-02-01",
+        end_date="2024-02-29",
+        username=test_user,
+        summary="Feb summary.",
+    )
+    r3 = ActivityRollup(
+        period_type="month",
+        start_date="2024-03-01",
+        end_date="2024-03-31",
+        username=test_user,
+        summary="Mar summary.",
+    )
+
+    try:
+        write_rollups([r1, r2, r3], client=client)
+
+        # Query with OUTER bounds matching the full Q1 range
+        q1_results = read_rollups(
+            username=test_user,
+            start_date="2024-01-01",
+            end_date="2024-03-31",
+            client=client,
+            expected_min_count=3,
+            timeout_seconds=20.0,
+        )
+        assert len(q1_results) == 3
+
+        # Query with narrower range covering only Feb
+        feb_results = read_rollups(
+            username=test_user,
+            start_date="2024-02-01",
+            end_date="2024-02-28",
+            client=client,
+            expected_min_count=1,
+            timeout_seconds=10.0,
+        )
+        assert len(feb_results) == 1
+        assert feb_results[0].summary == "Feb summary."
+
+        # Query completely outside range (e.g., 2025-01-01 to 2025-12-31)
+        out_results = read_rollups(
+            username=test_user,
+            start_date="2025-01-01",
+            end_date="2025-12-31",
+            client=client,
+        )
+        assert len(out_results) == 0
+
+    finally:
+        clear_rollups(username=test_user, client=client)
+
+
 def test_generate_day_week_rollup_chunks_and_work_items():
     start = "2026-06-01"
     end = "2026-06-07"

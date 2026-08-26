@@ -208,8 +208,8 @@ def read_notability_signals(
     Args:
         username: Optional username filter.
         period_type: Optional period type filter.
-        start_date: Optional start date string filter.
-        end_date: Optional end date string filter.
+        start_date: Optional start date string range filter ("YYYY-MM-DD").
+        end_date: Optional end date string range filter ("YYYY-MM-DD").
         start_time: Start of Fulcra query window (defaults to 5 years ago).
         end_time: End of Fulcra query window (defaults to current time + 5 mins).
         client: Optional authenticated FulcraAPI client.
@@ -218,7 +218,7 @@ def read_notability_signals(
         poll_interval: Interval between poll attempts.
 
     Returns:
-        List of matching NotabilitySignal objects.
+        List of matching NotabilitySignal objects whose date ranges overlap [start_date, end_date].
     """
     if client is None:
         client = get_fulcra_client()
@@ -262,9 +262,11 @@ def read_notability_signals(
                         continue
                     if period_type and data.get("period_type") != period_type:
                         continue
-                    if start_date and data.get("start_date") != start_date:
+                    rec_start = data.get("start_date")
+                    rec_end = data.get("end_date") or rec_start
+                    if end_date and rec_start and rec_start > end_date:
                         continue
-                    if end_date and data.get("end_date") != end_date:
+                    if start_date and rec_end and rec_end < start_date:
                         continue
                     signal = NotabilitySignal.from_dict(data, record_id=ann.get("id"))
                     results.append(signal)
