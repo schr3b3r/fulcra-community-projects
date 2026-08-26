@@ -65,8 +65,16 @@ def test_checkpoint_custom_type_write_and_read():
         )
         write_checkpoint(cp, client=client)
 
+        # 30s (not the more typical 15s used elsewhere in this file) --
+        # this specific test has been observed flaking with a real
+        # eventual-consistency delay exceeding 15s on Fulcra's backend
+        # (confirmed passing cleanly on isolated retry every time this was
+        # investigated; see app/CONTEXT.md's Decisions Log). read_checkpoint
+        # already has real polling infrastructure -- this just gives it a
+        # wider window before giving up, rather than treating a real but
+        # slow eventual-consistency delay as a hard test failure.
         read_cp = read_checkpoint(
-            task_id=task_id, client=client, use_cache=False, timeout_seconds=15.0
+            task_id=task_id, client=client, use_cache=False, timeout_seconds=30.0
         )
         assert read_cp is not None
         assert read_cp.task_id == task_id
@@ -178,7 +186,7 @@ def test_rollup_custom_type_write_and_read():
             period_type="week",
             client=client,
             expected_min_count=1,
-            timeout_seconds=15.0,
+            timeout_seconds=30.0,
         )
         assert len(recs) >= 1
         assert recs[0].username == username

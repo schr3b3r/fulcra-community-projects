@@ -125,6 +125,88 @@ def test_notability_signal_to_fulcra_record_source_chain_marks_derived_data():
     assert "agent.engineering-journey.notability" in rec["sources"]
 
 
+def test_read_notability_signals_date_range_overlap_and_outer_bounds():
+    """Verify read_notability_signals performs genuine range-overlap filtering
+    instead of exact string matching.
+
+    Regression test for a real bug found via a live full-scale backfill: a
+    real account with 310 real ActivityRollup records ended up with ZERO
+    NotabilitySignal records after a real backfill run, because
+    read_rollups/read_notability_signals treated start_date/end_date as
+    exact-string-equality filters instead of range filters, so any real
+    multi-period query (e.g. a 3-year backfill window) silently returned 0
+    results -- even though the caller (generate_notability_signals) already
+    assumed and correctly implemented range semantics downstream, it never
+    got real data to operate on. This is exactly that failure shape: query
+    with OUTER bounds that don't exactly match any single record's own
+    start_date/end_date, and assert all overlapping records are still
+    returned.
+    """
+    client = get_fulcra_client()
+    test_user = f"rangesignaluser_{uuid.uuid4().hex[:6]}"
+
+    s1 = NotabilitySignal(
+        period_type="month",
+        start_date="2024-01-01",
+        end_date="2024-01-31",
+        username=test_user,
+        notability_score=0.3,
+    )
+    s2 = NotabilitySignal(
+        period_type="month",
+        start_date="2024-02-01",
+        end_date="2024-02-29",
+        username=test_user,
+        notability_score=0.4,
+    )
+    s3 = NotabilitySignal(
+        period_type="month",
+        start_date="2024-03-01",
+        end_date="2024-03-31",
+        username=test_user,
+        notability_score=0.5,
+    )
+
+    try:
+        write_notability_signals([s1, s2, s3], client=client)
+
+        # Query with OUTER bounds matching the full Q1 range -- none of
+        # these exactly equal any single record's start_date/end_date.
+        q1_results = read_notability_signals(
+            username=test_user,
+            start_date="2024-01-01",
+            end_date="2024-03-31",
+            client=client,
+            expected_min_count=3,
+            timeout_seconds=20.0,
+        )
+        assert len(q1_results) == 3
+
+        # Query with a narrower range covering only Feb
+        feb_results = read_notability_signals(
+            username=test_user,
+            start_date="2024-02-01",
+            end_date="2024-02-28",
+            client=client,
+            expected_min_count=1,
+            timeout_seconds=10.0,
+        )
+        assert len(feb_results) == 1
+        assert feb_results[0].notability_score == 0.4
+
+        # Query completely outside the range
+        out_results = read_notability_signals(
+            username=test_user,
+            start_date="2025-01-01",
+            end_date="2025-12-31",
+            client=client,
+        )
+        assert len(out_results) == 0
+
+    finally:
+        clear_notability_signals(username=test_user, client=client)
+
+
 def test_write_and_read_notability_signals():
     client = get_fulcra_client()
     test_user = f"testuser_{uuid.uuid4().hex[:6]}"
