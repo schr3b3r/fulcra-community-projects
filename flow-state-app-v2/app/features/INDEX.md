@@ -15,6 +15,7 @@ status changes.
 | [dsp_idea_extraction](./dsp_idea_extraction.md) | done | Extract a 15-second clip around a detected marker and tag it with Key and BPM. |
 | [musical_idea_publishing](./musical_idea_publishing.md) | done | Push an extracted musical idea to Fulcra (via SDK) for storage and later retrieval. |
 | [recording_frontend](./recording_frontend.md) | done | SvelteKit UI to capture audio, stream it to the backend, and review extracted ideas afterward. |
+| [metadata_provenance_and_consent](./metadata_provenance_and_consent.md) | done (generator and tests) | Optional metadata-only transformation evidence for one explicitly opted-in session; not connected to a live user session. |
 
 ## Status values
 - `not_started` — described but no work done yet.
