@@ -1,7 +1,7 @@
 # Feature: Metadata-only provenance and consent
 
 ## Status
-done (generator and tests); not connected to a live user session
+done (generator and tests); not connected to the automatic pipeline
 
 ## Description
 For one explicitly opted-in Flow State session, produce a deterministic record
@@ -32,11 +32,12 @@ not alter Fulcra access enforcement, and does not assert creative ownership.
 - [x] Has focused automated tests using synthetic byte fixtures; no Fulcra
       account, network call or real creative recording is required.
 
-## Deferred one-session validation
-The first real test requires a musician to opt in to one named session and
-choose a sharing scope. The generated record should then be compared against
-the actual published `MusicalIdea`. That validation must not publish audio,
-session/marker digests, or claim that Maha changed Fulcra's storage policy.
+## Session-validation boundary
+Any session-level validation requires a separate explicit opt-in and a selected
+sharing scope. Private validation materials and results must remain outside this
+repository unless the participant separately authorizes public disclosure. The
+public implementation and tests therefore stand on synthetic byte fixtures and
+make no claim that a human creative session has been validated.
 
 ## Implementation
 `app/provenance.py` exposes:
